@@ -6,6 +6,28 @@ Reverse-proxy / embed-wrapper untuk streaming anime subtitle Indonesia dari sumb
 > Intinya: semua link embed dibungkus ke origin sendiri, jadi browser tidak pernah
 > secara langsung menyentuh CDN video, dan halaman player bisa dikontrol penuh.
 
+## Sumber (multi-source)
+
+Relay ini bisa membaca dua situs dengan tema WordPress yang sama:
+
+| id | base | catatan |
+|---|---|---|
+| `donghive` (default) | https://donghive.vip | katalog lengkap, sebagian episode cuma punya Dailymotion (dikunci domain) |
+| `anichin` | https://anichin.moe | 7–8 mirror per episode (OKRU, Odysee, Nunadrama, DTube, MEGA, Rumble, dll) |
+
+Pilih lewat UI (drawer → **Sumber katalog**) atau API: `?src=anichin` pada
+`/api/home`, `/api/anime`, `/api/genre/:slug`, `/api/search`, `/api/anime/:slug`,
+`/api/episode/:slug`. Tanpa parameter = `donghive`.
+
+Kode scraper ada di `server/scraper.js` (`createSource(base, imageHosts)`),
+`server/donghive.js` cuma re-export sumber default supaya import lama tetap jalan.
+
+## Paging (hasil RE)
+
+- Arsip `/anime/` → `?page=N` (bukan `/page/N/`), 20 judul/halaman.
+- Genre `/genres/<slug>/` → `/page/N/`, 10 judul/halaman, jumlah halaman ada di markup.
+- Pencarian `?s=<q>` strict substring — typo = 0 hasil, jadi ada saran trigram.
+
 ## Fitur
 
 - **Relay / bridge** — `/e/<slug>` menyajikan halaman player milik server sendiri; iframe-nya
