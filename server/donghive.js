@@ -436,8 +436,9 @@ export async function fetchAnimeDetail(slug) {
  *
  * Catatan lapangan: player Dailymotion milik donghive (geo.dailymotion.com/
  * player/<id>.html) DIKUNCI ke domain donghive.vip — dari origin lain
- * hasilnya "This video cannot be played on this site". Jadi DM selalu
- * ditandai playable:false dan ditaruh paling bawah.
+ * hasilnya "This video cannot be played on this site". Relay memalsukan
+ * embedder lewat shim di /bridge/dm (lihat ORIGIN_SHIM), jadi DM sekarang
+ * bisa dicoba; tetap ditaruh paling bawah karena paling rapuh.
  */
 const KIND_META = {
   okru: { label: 'OKRU', rank: 0, playable: true, note: '' },
@@ -449,15 +450,15 @@ const KIND_META = {
   // streaming — masih jalan, tapi di bawah provider yang benar-benar play.
   mega: { label: 'MEGA', rank: 3, playable: true, note: 'file viewer (klik untuk putar)' },
   other: { label: 'Server lain', rank: 5, playable: true, note: '' },
-  // Semua video donghive di Dailymotion bertanda `private: true` di
-  // player/metadata, dan player-nya dikunci ke domain donghive.vip.
-  // Bukan soal proxy/referer — video private tidak bisa diputar dari
-  // luar player pemiliknya. Dibiarkan sebagai opsi terakhir + label jujur.
+  // Video donghive di Dailymotion bertanda `private: true`, dan player-nya
+  // hanya mau jalan kalau embedder-nya donghive.vip.
+  // Karena butuh proxy media + cookie, DM ditaruh paling akhir: paling gampang
+  // patah kalau Dailymotion mengubah pengecekannya.
   dailymotion: {
     label: 'Dailymotion',
     rank: 9,
-    playable: false,
-    note: 'video private — player dikunci ke donghive.vip',
+    playable: true,
+    note: 'embedder dipalsukan jadi donghive.vip — kalau DM ubah cek, bisa gagal',
   },
 }
 
