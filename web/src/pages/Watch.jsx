@@ -25,7 +25,7 @@ export default function Watch({ slug }) {
   const episode = useAsync(() => fetchEpisode(slug), [slug])
   const data = episode.data
 
-  const animeSlug = useMemo(() => slugFromUrl(data?.anime_url), [data])
+  const animeSlug = useMemo(() => data?.anime_slug || slugFromUrl(data?.anime_url), [data])
   const anime = useAsync(
     () => (animeSlug ? fetchAnime(animeSlug) : Promise.resolve(null)),
     [animeSlug],

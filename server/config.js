@@ -16,6 +16,8 @@ export const CONFIG = {
     's1.dmcdn.net',
     's2.dmcdn.net',
     'geo.dailymotion.com',
+    'donghive.vip',
+    'www.donghive.vip',
   ],
 
   // Cache TTL untuk resolusi video id episode (ms)

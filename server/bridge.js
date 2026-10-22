@@ -79,22 +79,41 @@ export function isAllowedProxyUrl(raw) {
 
 /** Rewrite URL absolut dailymotion/dmcdn → lewat proxy kita. */
 export function rewriteToProxy(html, origin) {
+  // Tangkap URL LENGKAP (path + query) lalu encode, bukan cuma host —
+  // kalau cuma host yang diganti, path-nya jadi URL relatif dan proxy
+  // tidak bisa meneruskannya.
+  const patterns = [
+    /https:\/\/geo\.dailymotion\.com[^"'\s)<>\\]*/gi,
+    /https:\/\/api(?:-2)?\.dailymotion\.com[^"'\s)<>\\]*/gi,
+    /https:\/\/www\.dailymotion\.com[^"'\s)<>\\]*/gi,
+    /https:\/\/s[12]\.dmcdn\.net[^"'\s)<>\\]*/gi,
+    /\/\/geo\.dailymotion\.com[^"'\s)<>\\]*/gi,
+    /\/\/api(?:-2)?\.dailymotion\.com[^"'\s)<>\\]*/gi,
+    /\/\/s[12]\.dmcdn\.net[^"'\s)<>\\]*/gi,
+  ]
   let out = html
-  for (const host of DM_API_HOSTS) {
-    out = out.split(host).join(`${origin}/api/proxy?u=`)
+  for (const re of patterns) {
+    out = out.replace(re, (m) => `${origin}/api/proxy?u=${encodeURIComponent(m)}`)
   }
-  out = out.replace(/(["'(])(\/\/)(geo|api|www)\.dailymotion\.com/g, `$1${origin}/api/proxy?u=$2`)
-  out = out.replace(/(["'(])(\/\/)(s1|s2)\.dmcdn\.net/g, `$1${origin}/api/proxy?u=$2`)
   return out
 }
 
 /** Ambil aset dailymotion lewat server kita (biar origin一致, aman dari hotlink block). */
 export async function proxyAsset(req, res, rawUrl) {
-  if (!isAllowedProxyUrl(rawUrl)) {
+  // URL relatif (mis. /static/... dari <base href>) resolve ke host dailymotion
+  let target
+  try {
+    target = rawUrl.startsWith('/')
+      ? new URL(rawUrl, 'https://geo.dailymotion.com')
+      : new URL(rawUrl)
+  } catch {
+    res.status(400).json({ error: 'URL tidak valid' })
+    return
+  }
+  if (!isAllowedProxyUrl(target.toString())) {
     res.status(403).json({ error: 'host tidak diizinkan' })
     return
   }
-  const target = new URL(rawUrl)
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), CONFIG.requestTimeoutMs)
   try {

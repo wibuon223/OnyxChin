@@ -10,6 +10,17 @@ export function slugFromUrl(url) {
   return parts.length ? parts[parts.length - 1] : ''
 }
 
+export function isEpisodeSlug(slug) {
+  if (!slug || typeof slug !== 'string') return false
+  return /-episode-\d+/i.test(slug)
+}
+
+export function cardSlug(card) {
+  if (!card) return ''
+  if (card.slug) return card.slug
+  return slugFromUrl(card.url)
+}
+
 export function resolveAsset(url) {
   if (!url || typeof url !== 'string') return ''
   const value = url.trim()
@@ -50,9 +61,4 @@ export function formatDate(value) {
     month: 'short',
     year: 'numeric',
   })
-}
-
-export function episodeLabel(number) {
-  if (number === undefined || number === null || number === '') return '-'
-  return `EP ${String(number).padStart(2, '0')}`
 }

@@ -28,6 +28,28 @@ const abs = (href, base = UP) => {
   }
 }
 
+/**
+ * Poster donghive.vip tidak bisa dimuat cross-origin dari browser:
+ * upstream kirim `cross-origin-resource-policy: same-origin` (dan ada
+ * Cloudflare challenge), jadi <img> di-block ERR_BLOCKED_BY_RESPONSE.
+ * Solusinya: semua thumbnail dilewatkan proxy relay kita sendiri.
+ */
+const PROXYED_IMAGE_HOSTS = ['donghive.vip', 'www.donghive.vip']
+
+function imgSrc(src, base = UP) {
+  if (!src) return ''
+  const full = abs(src, base)
+  try {
+    const host = new URL(full).hostname
+    if (PROXYED_IMAGE_HOSTS.includes(host)) {
+      return `/api/proxy?u=${encodeURIComponent(full)}`
+    }
+  } catch {
+    return full
+  }
+  return full
+}
+
 /** Card anime dari <article class="bs"> */
 function parseArticle($, art, section = '') {
   const a = art.find('a.tip').first()
@@ -49,7 +71,7 @@ function parseArticle($, art, section = '') {
   }
 
   const img = art.find('img.ts-post-image, img.wp-post-image, img').first()
-  const thumb = img.attr('src') ? abs(img.attr('src')) : ''
+  const thumb = imgSrc(img.attr('src'))
 
   return {
     title,
@@ -107,7 +129,7 @@ export async function fetchHome() {
       type: '',
       episode: '',
       subtitle: '',
-      thumbnail: img.attr('src') ? abs(img.attr('src')) : '',
+      thumbnail: imgSrc(img.attr('src')),
       series: '',
       rank: '',
       genres: [],
@@ -190,7 +212,7 @@ export async function fetchHome() {
         type: '',
         episode: '',
         subtitle: '',
-        thumbnail: img.attr('src') ? abs(img.attr('src')) : '',
+        thumbnail: imgSrc(img.attr('src')),
         series: '',
         rank: text(li.find('.ctr').first()),
         genres,
@@ -234,7 +256,7 @@ export async function fetchHome() {
       type: '',
       episode: '',
       subtitle: '',
-      thumbnail: img.attr('src') ? abs(img.attr('src')) : '',
+      thumbnail: imgSrc(img.attr('src')),
       series: '',
       rank: '',
       genres: [],
@@ -376,7 +398,7 @@ export async function fetchAnimeDetail(slug) {
   const description = text($('.mindesc, .synopsis, .anime-description, .description').first())
 
   const img = $('img.ts-post-image, img.wp-post-image, .anime-poster img, img').first()
-  const thumbnail = img.attr('src') ? abs(img.attr('src'), url) : ''
+  const thumbnail = imgSrc(img.attr('src'), url)
 
   const episodes = []
   $('.eplister li').each((_, el) => {

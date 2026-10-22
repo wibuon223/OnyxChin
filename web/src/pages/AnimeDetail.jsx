@@ -4,10 +4,12 @@ import { fetchAnime } from '../api'
 import EmptyState from '../components/EmptyState'
 import ErrorState from '../components/ErrorState'
 import EpisodeList from '../components/EpisodeList'
+import PosterFallback from '../components/PosterFallback'
 import { Skeleton } from '../components/Skeleton'
 import useAsync from '../hooks/useAsync'
+import useImageSource from '../hooks/useImageSource'
 import { navigate } from '../hooks/useRoute'
-import { resolveAsset, slugFromUrl, stripHtml } from '../utils'
+import { cardSlug, stripHtml } from '../utils'
 
 function MetaItem({ label, value }) {
   if (!value) return null
@@ -58,10 +60,12 @@ export default function AnimeDetail({ slug }) {
     [data],
   )
   const firstPlayable = useMemo(
-    () => episodes.find((episode) => episode.embed && slugFromUrl(episode.url)),
+    () => episodes.find((episode) => episode.embed && cardSlug(episode)),
     [episodes],
   )
-  const poster = resolveAsset(data?.thumbnail)
+  const { src: poster, failed: posterFailed, onError: onPosterError } = useImageSource(
+    data?.thumbnail,
+  )
 
   if (detail.loading) {
     return <DetailSkeleton />
@@ -90,24 +94,28 @@ export default function AnimeDetail({ slug }) {
     )
   }
 
-  const watchHref = firstPlayable ? `/watch/${slugFromUrl(firstPlayable.url)}` : ''
+  const watchHref = firstPlayable ? `/watch/${cardSlug(firstPlayable)}` : ''
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
       <div className="flex flex-col gap-6 sm:flex-row sm:gap-8">
         <div className="w-36 shrink-0 sm:w-44 lg:w-56">
           <div className="aspect-[2/3] overflow-hidden rounded-xl border border-white/10 bg-ink-850 shadow-card">
-            {poster ? (
+            {!posterFailed ? (
               <img
                 src={poster}
                 alt={`Poster ${data.title || 'anime'}`}
+                referrerPolicy="no-referrer"
+                onError={onPosterError}
                 className="h-full w-full object-cover"
                 loading="lazy"
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-widest text-ink-600">
-                Donghive
-              </div>
+              <PosterFallback
+                title={data.title}
+                type={data.type}
+                className="h-full w-full"
+              />
             )}
           </div>
         </div>

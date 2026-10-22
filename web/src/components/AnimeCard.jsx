@@ -1,23 +1,13 @@
-import { useState } from 'react'
 import { Play } from 'lucide-react'
 import { navigate } from '../hooks/useRoute'
-import { resolveAsset, slugFromUrl } from '../utils'
-
-function PosterFallback({ className = '' }) {
-  return (
-    <div
-      className={`flex items-center justify-center bg-gradient-to-br from-ink-800 to-ink-900 text-xs font-semibold uppercase tracking-widest text-ink-600 ${className}`}
-    >
-      Donghive
-    </div>
-  )
-}
+import useImageSource from '../hooks/useImageSource'
+import PosterFallback from './PosterFallback'
+import { cardSlug, isEpisodeSlug } from '../utils'
 
 export default function AnimeCard({ card, className = '' }) {
-  const [broken, setBroken] = useState(false)
-  const slug = slugFromUrl(card.url)
-  const href = slug ? `/anime/${slug}` : '/'
-  const poster = resolveAsset(card.thumbnail)
+  const { src, failed, onError } = useImageSource(card.thumbnail)
+  const slug = cardSlug(card)
+  const href = slug ? (isEpisodeSlug(slug) ? `/watch/${slug}` : `/anime/${slug}`) : '/'
   const episode = card.episode || ''
   const type = card.type || ''
   const series = card.series && card.series !== card.title ? card.series : ''
@@ -36,17 +26,18 @@ export default function AnimeCard({ card, className = '' }) {
       aria-label={`Lihat detail ${card.title || 'anime'}`}
     >
       <div className="relative aspect-[2/3] overflow-hidden rounded-xl border border-white/10 bg-ink-850 transition duration-300 group-hover:-translate-y-1 group-hover:border-accent/60 group-hover:shadow-glow">
-        {poster && !broken ? (
+        {!failed ? (
           <img
-            src={poster}
+            src={src}
             alt={`Poster ${card.title || 'anime'}`}
             loading="lazy"
             decoding="async"
-            onError={() => setBroken(true)}
+            referrerPolicy="no-referrer"
+            onError={onError}
             className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
           />
         ) : (
-          <PosterFallback className="h-full w-full" />
+          <PosterFallback title={card.title} type={type} className="h-full w-full" />
         )}
 
         <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-ink-950 via-ink-950/70 to-transparent" />

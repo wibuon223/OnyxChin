@@ -1,11 +1,11 @@
 import { CalendarDays, Lock } from 'lucide-react'
 import { navigate } from '../hooks/useRoute'
-import { formatDate, slugFromUrl } from '../utils'
+import { cardSlug, formatDate } from '../utils'
 
 export default function EpisodeList({
   episodes = [],
   activeSlug = '',
-  activeNumber = null,
+
   loading = false,
   emptyMessage = 'Belum ada episode untuk judul ini.',
 }) {
@@ -34,11 +34,9 @@ export default function EpisodeList({
   return (
     <ul className="divide-y divide-white/5 overflow-hidden rounded-xl border border-white/10 bg-ink-900/40">
       {episodes.map((episode, index) => {
-        const slug = slugFromUrl(episode.url)
+        const slug = cardSlug(episode)
         const playable = Boolean(episode.embed)
-        const isActive =
-          (activeSlug && slug === activeSlug) ||
-          (activeNumber !== null && String(episode.number) === String(activeNumber))
+        const isActive = Boolean(activeSlug) && slug === activeSlug
         const href = slug ? `/watch/${slug}` : '#'
 
         const handleClick = (event) => {

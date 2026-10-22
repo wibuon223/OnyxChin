@@ -35,7 +35,9 @@ const asyncRoute = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next
 /** Bungkus nilai jadi URL absolut terhadap origin aktif. */
 function absolutizeDeep(value, req) {
   if (typeof value === 'string') {
-    if (value.startsWith('/e/') || value.startsWith('/bridge/')) return absolute(req, value)
+    if (value.startsWith('/e/') || value.startsWith('/bridge/') || value.startsWith('/api/proxy')) {
+      return absolute(req, value)
+    }
     return value
   }
   if (Array.isArray(value)) return value.map((v) => absolutizeDeep(v, req))
@@ -46,7 +48,6 @@ function absolutizeDeep(value, req) {
   }
   return value
 }
-
 function intParam(value, fallback, max = 50) {
   const n = Number.parseInt(value, 10)
   if (!Number.isFinite(n) || n < 1) return fallback
@@ -54,6 +55,28 @@ function intParam(value, fallback, max = 50) {
 }
 
 /* ───────────────────────── system ───────────────────────── */
+
+/* Cache TTL pendek: scraping upstream itu mahal, dan homepage cuma berubah
+   tiap beberapa menit. Render free-tier juga sleep, jadi cache panas. */
+const ttlCache = new Map()
+
+function cached(key, ttlMs, producer) {
+  const hit = ttlCache.get(key)
+  if (hit && Date.now() < hit.expires) return hit.value
+  const value = Promise.resolve()
+    .then(producer)
+    .catch((err) => {
+      ttlCache.delete(key)
+      throw err
+    })
+  ttlCache.set(key, { value, expires: Date.now() + ttlMs })
+  if (ttlCache.size > 200) ttlCache.delete(ttlCache.keys().next().value)
+  return value
+}
+
+const HOME_TTL = 60_000
+const LIST_TTL = 120_000
+const DETAIL_TTL = 300_000
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -78,7 +101,7 @@ app.get('/api/config', (req, res) => {
 app.get(
   '/api/home',
   asyncRoute(async (req, res) => {
-    const data = await fetchHome()
+    const data = await cached('home', HOME_TTL, () => fetchHome())
     res.json(absolutizeDeep(data, req))
   }),
 )
@@ -88,7 +111,7 @@ app.get(
   asyncRoute(async (req, res) => {
     const page = intParam(req.query.page, 1, 500)
     const maxPages = intParam(req.query.max_pages, 1, 20)
-    const data = await fetchViewAll({ page, maxPages })
+    const data = await cached(`anime:${page}:${maxPages}`, LIST_TTL, () => fetchViewAll({ page, maxPages }))
     res.json(absolutizeDeep(data, req))
   }),
 )
@@ -98,7 +121,9 @@ app.get(
   asyncRoute(async (req, res) => {
     const page = intParam(req.query.page, 1, 500)
     const maxPages = intParam(req.query.max_pages, 1, 20)
-    const data = await fetchGenrePage(req.params.slug, { page, maxPages })
+    const data = await cached(`genre:${req.params.slug}:${page}:${maxPages}`, LIST_TTL, () =>
+      fetchGenrePage(req.params.slug, { page, maxPages }),
+    )
     res.json(absolutizeDeep(data, req))
   }),
 )
@@ -106,7 +131,7 @@ app.get(
 app.get(
   '/api/genres',
   asyncRoute(async (req, res) => {
-    res.json(await fetchGenres())
+    res.json(await cached('genres', LIST_TTL, () => fetchGenres()))
   }),
 )
 
@@ -119,7 +144,7 @@ app.get(
       return
     }
     const page = intParam(req.query.page, 1, 500)
-    const data = await fetchSearch(q, { page })
+    const data = await cached(`search:${q}:${page}`, LIST_TTL, () => fetchSearch(q, { page }))
     res.json(absolutizeDeep({ query: q, ...data }, req))
   }),
 )
@@ -129,7 +154,9 @@ app.get(
 app.get(
   '/api/anime/:slug',
   asyncRoute(async (req, res) => {
-    const data = await fetchAnimeDetail(req.params.slug)
+    const data = await cached(`detail:${req.params.slug}`, DETAIL_TTL, () =>
+      fetchAnimeDetail(req.params.slug),
+    )
     res.json(absolutizeDeep(data, req))
   }),
 )
@@ -137,7 +164,9 @@ app.get(
 app.get(
   '/api/episode/:slug',
   asyncRoute(async (req, res) => {
-    const page = await fetchEpisodePage(req.params.slug)
+    const page = await cached(`episode:${req.params.slug}`, DETAIL_TTL, () =>
+      fetchEpisodePage(req.params.slug),
+    )
     const origin = originOf(req)
     const resolved = await resolveVideo(req.params.slug).catch(() => null)
 
