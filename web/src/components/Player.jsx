@@ -36,7 +36,10 @@ export default function Player({
 
   const fallback = useMemo(() => {
     if (!usable.length) return ''
-    return (usable.find((s) => s.playable !== false) || usable[0]).kind || ''
+    // `experimental` (mis. Dailymotion) cuma boleh dipilih manual, jangan
+    // pernah jadi default — playback-nya bergantung sama spoof origin.
+    const safe = usable.filter((s) => s.playable !== false && !s.experimental)
+    return (safe[0] || usable.find((s) => s.playable !== false) || usable[0]).kind || ''
   }, [usable])
 
   const [picked, setPicked] = useState(() => {

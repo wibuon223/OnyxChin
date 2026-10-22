@@ -458,6 +458,9 @@ const KIND_META = {
     label: 'Dailymotion',
     rank: 9,
     playable: true,
+    // `experimental`: boleh dicoba (embedder dipalsukan), tapi jangan pernah
+    // jadi pilihan default — playback-nya paling rapuh dari semua mirror.
+    experimental: true,
     note: 'embedder dipalsukan jadi donghive.vip — kalau DM ubah cek, bisa gagal',
   },
 }
@@ -502,6 +505,7 @@ export function parseServers($) {
       url,
       playable: meta.playable,
       note: meta.note,
+      experimental: meta.experimental === true,
       rank: meta.rank,
     })
   })
