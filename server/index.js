@@ -112,7 +112,25 @@ app.get(
     const page = intParam(req.query.page, 1, 500)
     const maxPages = intParam(req.query.max_pages, 1, 20)
     const data = await cached(`anime:${page}:${maxPages}`, LIST_TTL, () => fetchViewAll({ page, maxPages }))
-    res.json(absolutizeDeep(data, req))
+    // Arsip /anime/ tidak mencantumkan jumlah halaman, jadi intip halaman
+    // berikutnya sekali (di-cache) supaya tombol "Berikutnya" tahu kapan stop.
+    let hasNext = data.items.length > 0
+    if (page < 400) {
+      const peek = await cached(`anime:peek:${page + 1}`, LIST_TTL, () =>
+        fetchViewAll({ page: page + 1, maxPages: 1 }),
+      )
+      hasNext = peek.items.length > 0
+    }
+    res.json(
+      absolutizeDeep(
+        {
+          ...data,
+          total_pages: Math.max(data.total_pages, hasNext ? page + 1 : page),
+          has_next: hasNext,
+        },
+        req,
+      ),
+    )
   }),
 )
 

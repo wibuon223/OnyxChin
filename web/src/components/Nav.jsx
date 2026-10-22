@@ -82,7 +82,7 @@ export default function Nav({ path = '/' }) {
               href="/"
               onClick={(event) => go(event, '/')}
               className="group flex items-center gap-2.5"
-              aria-label="Donghive Relay — beranda"
+              aria-label="OnyxChin — beranda"
             >
               <span className="relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl border border-white/12 bg-white/[0.06] text-accent shadow-glass">
                 <span
@@ -93,7 +93,7 @@ export default function Nav({ path = '/' }) {
               </span>
               <span className="min-w-0">
                 <span className="block font-display text-[15px] font-extrabold leading-none tracking-[-0.01em] text-white">
-                  Donghive
+                  Onyx<span className="text-accent">Chin</span>
                 </span>
                 <span className="mt-1 block text-[10px] font-semibold uppercase tracking-[0.26em] text-slate-500">
                   Relay

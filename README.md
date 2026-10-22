@@ -1,4 +1,4 @@
-# Donghive Relay
+# OnyxChin
 
 Reverse-proxy / embed-wrapper untuk streaming anime subtitle Indonesia dari sumber `https://donghive.vip`.
 

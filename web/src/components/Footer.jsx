@@ -11,7 +11,7 @@ export default function Footer() {
                 <Radio size={16} strokeWidth={2.1} aria-hidden="true" />
               </span>
               <span className="font-display text-[13px] font-extrabold uppercase tracking-[0.22em] text-white">
-                Donghive Relay
+                OnyxChin
               </span>
             </div>
             <p className="max-w-md text-[12px] leading-relaxed text-slate-500">

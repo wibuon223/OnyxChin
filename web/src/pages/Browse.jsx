@@ -14,7 +14,8 @@ export default function Browse() {
   const totalPages = Number(list.data?.total_pages) || 1
   const currentPage = Number(list.data?.page) || page
   const canPrev = currentPage > 1
-  const canNext = currentPage < totalPages
+  const canNext = list.data?.has_next ?? currentPage < totalPages
+
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8 lg:py-12">
@@ -56,7 +57,7 @@ export default function Browse() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                  onClick={() => setPage((value) => value + 1)}
                   disabled={!canNext}
                   className="btn-ghost disabled:opacity-40"
                 >

@@ -8,7 +8,7 @@ export function buildOpenApi({ origin, version }) {
   return {
     openapi: '3.0.3',
     info: {
-      title: 'Donghive Relay API',
+      title: 'OnyxChin API',
       version,
       description:
         'Relay/bridge untuk streaming anime subtitle Indonesia dari sumber https://donghive.vip.\n\n' +
@@ -16,7 +16,7 @@ export function buildOpenApi({ origin, version }) {
         '`/e/<slug>` (halaman bridge milik server ini) dan URL selalu absolut terhadap host aktif. ' +
         'Bridge juga menyediakan reverse-proxy penuh (`/bridge/dm`) yang menarik dokumen player ' +
         'Dailymotion lewat server sehingga browser hanya pernah bicara ke origin kita.',
-      contact: { name: 'Donghive Relay' },
+      contact: { name: 'OnyxChin' },
       license: { name: 'MIT' },
     },
     servers: [{ url: origin, description: 'Instance aktif' }],

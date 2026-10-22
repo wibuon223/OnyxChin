@@ -301,31 +301,42 @@ export async function fetchHome() {
 
 /* ─────────────────────────── listing ─────────────────────────── */
 
+/**
+ * Paging donghive: arsip `/anime/` TIDAK memakai `/page/N/` — ia memakai
+ * `?page=N`. Buktinya: `/anime/page/2/` mengembalikan 20 judul yang sama
+ * dengan halaman 1, sedangkan `/anime/?page=2` mengembalikan judul berbeda.
+ * Genre juga ikut `?page=N` (dan punya markup pagination 1..14).
+ */
 function listingUrl(base, page) {
-  if (page <= 1) return base
   const u = new URL(base)
-  if (u.search) {
-    u.searchParams.set('page', String(page))
+  if (page <= 1) return base
+  // Genre memakai /page/N/; arsip /anime/ dan ?s= memakai ?page=N.
+  if (/\/genres\//.test(u.pathname)) {
+    u.pathname = `${u.pathname.replace(/\/$/, '')}/page/${page}/`
     return u.toString()
   }
-  u.pathname = `${u.pathname.replace(/\/$/, '')}/page/${page}/`
+  u.searchParams.set('page', String(page))
   return u.toString()
 }
 
-async function nextPageHref($, current) {
-  const a = $('.pagination a.next.page-numbers, a.next, a[rel="next"]').first()
-  if (a.length && a.attr('href')) return abs(a.attr('href'))
-  return null
+/** Angka halaman terbesar dari markup pagination (0 kalau tidak ada). */
+function lastPageNumber($) {
+  let max = 0
+  $('a.page-numbers, span.page-numbers, .pagination .page-numbers').each((_, el) => {
+    const n = Number(text($(el)).replace(/[^\d]/g, ''))
+    if (Number.isFinite(n) && n > max) max = n
+  })
+  return max
 }
 
 export async function fetchListing(baseUrl, { page = 1, maxPages = 1, section = 'Listing' } = {}) {
   const items = []
-  let current = baseUrl
-  let totalPages = 1
+  let totalPages = Math.max(1, page)
   let blocked = false
+  let pageSize = 0
 
-  for (let p = 1; p <= maxPages; p += 1) {
-    const target = p === 1 ? current : current
+  for (let p = page; p < page + Math.max(1, maxPages); p += 1) {
+    const target = listingUrl(baseUrl, p)
     const html = await getHtml(target)
     const $ = cheerio.load(html)
     blocked = looksBlocked(html) && !$('article.bs').length && !$('.listupd').length
@@ -335,9 +346,9 @@ export async function fetchListing(baseUrl, { page = 1, maxPages = 1, section = 
       const c = parseArticle($, $(art), `${section} (p${p})`)
       if (c) cards.push(c)
     })
+
     // Kalau tidak ada <article class="bs">, jangan pernah jatuh ke sidebar:
-    // halaman "Not Found" punya puluhan link sidebar tanpa poster, dan itu
-    // yang dulu bikin hasil pencarian berisi judul acak + gambar kosong.
+    // halaman "Not Found" punya puluhan link sidebar tanpa poster.
     if (!cards.length) {
       const scope = $('.listupd').first()
       const anchors = scope.find('a.tip[href], .bsx > a[href]')
@@ -363,19 +374,11 @@ export async function fetchListing(baseUrl, { page = 1, maxPages = 1, section = 
 
     if (!cards.length) break
     items.push(...cards)
-
-    const next = await nextPageHref($, target)
-    if (next) {
-      current = next
-      totalPages = Math.max(totalPages, p + 1)
-    } else {
-      const m = text($('body')).match(/Page\s+\d+\s+of\s+(\d+)/i)
-      totalPages = Math.max(totalPages, m ? Number(m[1]) : p)
-      current = listingUrl(baseUrl, p + 1)
-    }
+    pageSize = cards.length
+    totalPages = Math.max(totalPages, p, lastPageNumber($))
   }
 
-  return { page, total_pages: totalPages, items: dedupe(items), blocked }
+  return { page, total_pages: totalPages, items: dedupe(items), blocked, page_size: pageSize }
 }
 
 export const fetchViewAll = (opts) =>
