@@ -79,12 +79,19 @@ export async function fetchUpstream(url, opts = {}) {
     } catch (err) {
       lastError = err
       if (proxy === null && proxies.length) continue
+      // proxy gagal juga -> coba lane berikutnya, jangan berhenti di lane pertama
+      continue
     } finally {
       clearTimeout(timer)
     }
   }
 
-  throw lastError || new Error(`upstream fetch gagal: ${url}`)
+  const detail = lastError?.cause?.message || lastError?.cause?.code || ''
+  const err = new Error(
+    `${lastError?.message || 'upstream fetch gagal'}${detail ? ` (${detail})` : ''} — ${url}`,
+  )
+  err.cause = lastError?.cause
+  throw err
 }
 
 /** Ambil HTML lewat fallback proxy, error kalau status bukan 2xx. */
