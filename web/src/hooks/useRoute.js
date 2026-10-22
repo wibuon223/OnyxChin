@@ -25,6 +25,10 @@ function parseLocation(pathname) {
     return { path: clean, params: {}, name: 'search' }
   }
 
+  if (segments[0] === 'history') {
+    return { path: clean, params: {}, name: 'history' }
+  }
+
   return { path: clean, params: {}, name: 'notfound' }
 }
 

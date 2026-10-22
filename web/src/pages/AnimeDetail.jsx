@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react'
-import { CalendarDays, ChevronDown, Play, Radio, Tv } from 'lucide-react'
+import { CalendarDays, ChevronDown, Clock3, Play, Radio, Tv } from 'lucide-react'
 import { fetchAnime } from '../api'
 import EmptyState from '../components/EmptyState'
 import ErrorState from '../components/ErrorState'
 import EpisodeList from '../components/EpisodeList'
 import PosterFallback from '../components/PosterFallback'
 import { Skeleton } from '../components/Skeleton'
-import useAsync from '../hooks/useAsync'
+import useCachedAsync from '../hooks/useCachedAsync'
+import useHistory from '../hooks/useHistory'
 import useImageSource from '../hooks/useImageSource'
 import { navigate } from '../hooks/useRoute'
+import { KEY, TTL } from '../lib/keys'
 import { cardSlug, stripHtml } from '../utils'
 
 function MetaItem({ label, value }) {
@@ -50,7 +52,8 @@ function DetailSkeleton() {
 
 export default function AnimeDetail({ slug }) {
   const [expanded, setExpanded] = useState(false)
-  const detail = useAsync(() => fetchAnime(slug), [slug])
+  const detail = useCachedAsync(KEY.anime(slug), () => fetchAnime(slug), { ttl: TTL.anime })
+  const history = useHistory()
 
   const data = detail.data
   const episodes = useMemo(() => (Array.isArray(data?.episodes) ? data.episodes : []), [data])
@@ -77,7 +80,7 @@ export default function AnimeDetail({ slug }) {
         <ErrorState
           title="Gagal memuat detail anime"
           message={detail.error.message}
-          onRetry={detail.retry}
+          onRetry={detail.refresh}
         />
       </div>
     )
@@ -95,20 +98,22 @@ export default function AnimeDetail({ slug }) {
   }
 
   const watchHref = firstPlayable ? `/watch/${cardSlug(firstPlayable)}` : ''
+  const lastWatched = history.lastFor(slug)
+  const watched = history.watched?.[slug] || []
+  const continueHref = lastWatched ? `/watch/${lastWatched.episodeSlug}` : watchHref
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
       <div className="flex flex-col gap-6 sm:flex-row sm:gap-8">
         <div className="w-36 shrink-0 sm:w-44 lg:w-56">
-          <div className="aspect-[2/3] overflow-hidden rounded-xl border border-white/10 bg-ink-850 shadow-card">
+          <div className="glass aspect-[2/3] overflow-hidden rounded-3xl p-1.5">
             {!posterFailed ? (
               <img
                 src={poster}
                 alt={`Poster ${data.title || 'anime'}`}
                 referrerPolicy="no-referrer"
                 onError={onPosterError}
-                className="h-full w-full object-cover"
-                loading="lazy"
+                className="h-full w-full rounded-[1.15rem] object-cover"
               />
             ) : (
               <PosterFallback
@@ -122,10 +127,10 @@ export default function AnimeDetail({ slug }) {
 
         <div className="min-w-0 flex-1">
           <p className="label-accent">{data.type || 'Anime'}</p>
-          <h1 className="mt-2 text-2xl font-bold leading-tight tracking-tight text-white sm:text-3xl lg:text-4xl">
+
+          <h1 className="display-1 mt-2 text-[2rem] sm:text-[2.6rem] lg:text-[3rem]">
             {data.title || 'Tanpa judul'}
           </h1>
-
           <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3 lg:grid-cols-5">
             <MetaItem label="Tipe" value={data.type} />
             <MetaItem label="Status" value={data.status} />
@@ -190,36 +195,73 @@ export default function AnimeDetail({ slug }) {
             </div>
           ) : null}
 
-          {watchHref ? (
-            <a
-              href={watchHref}
-              onClick={(event) => {
-                if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
-                event.preventDefault()
-                navigate(watchHref)
-              }}
-              className="mt-6 inline-flex items-center gap-2 rounded-lg bg-accent px-5 py-2.5 text-sm font-bold text-ink-950 transition hover:bg-accent-soft"
-            >
-              <Play size={16} strokeWidth={2.4} aria-hidden="true" />
-              Mulai Nonton
-            </a>
-          ) : null}
+          <div className="mt-6 flex flex-wrap items-center gap-2.5">
+            {lastWatched ? (
+              <a
+                href={continueHref}
+                onClick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+                  event.preventDefault()
+                  navigate(continueHref)
+                }}
+                className="btn-primary"
+              >
+                <Play size={15} strokeWidth={2.5} aria-hidden="true" />
+                Lanjut episode {lastWatched.episodeNumber || ''}
+              </a>
+            ) : null}
+
+            {watchHref ? (
+              <a
+                href={watchHref}
+                onClick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+                  event.preventDefault()
+                  navigate(watchHref)
+                }}
+                className={lastWatched ? 'btn-ghost' : 'btn-primary'}
+              >
+                <Play size={15} strokeWidth={2.5} aria-hidden="true" />
+                {lastWatched ? 'Mulai dari awal' : 'Mulai nonton'}
+              </a>
+            ) : null}
+
+            {lastWatched ? (
+              <span className="inline-flex items-center gap-1.5 text-[11.5px] text-slate-500">
+                <Clock3 size={12} strokeWidth={2.2} aria-hidden="true" />
+                terakhir: episode {lastWatched.episodeNumber || '—'}
+              </span>
+            ) : null}
+          </div>
         </div>
       </div>
 
-      <section className="mt-10 space-y-4">
-        <div className="flex items-baseline justify-between gap-4">
-          <h2 className="label-accent text-[12px] uppercase tracking-[0.22em]">Episode</h2>
+      <section className="mt-10 space-y-4 cv-auto">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="display-2">Episode</h2>
+            <p className="prose-muted mt-1 text-[12.5px]">
+              {episodes.length ? `${episodes.length} episode tersedia` : 'Belum ada episode'}
+              {lastWatched ? ` · terakhir dibuka episode ${lastWatched.episodeNumber || '—'}` : ''}
+            </p>
+          </div>
           {episodes.length ? (
-            <span className="font-mono text-xs text-slate-500">{episodes.length} episode</span>
+            <span className="chip">
+              <Tv size={12} strokeWidth={2.2} aria-hidden="true" />
+              {episodes.length}
+            </span>
           ) : null}
         </div>
 
-        <EpisodeList
-          episodes={episodes}
-          loading={detail.loading}
-          emptyMessage="Belum ada episode yang tayang untuk judul ini."
-        />
+        <div className="glass rounded-2xl p-2">
+          <EpisodeList
+            episodes={episodes}
+            watched={watched}
+            lastSlug={lastWatched?.episodeSlug || ''}
+            loading={detail.loading}
+            emptyMessage="Belum ada episode yang tayang untuk judul ini."
+          />
+        </div>
       </section>
     </div>
   )

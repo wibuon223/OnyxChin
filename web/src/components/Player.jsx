@@ -74,8 +74,8 @@ export default function Player({
 
   if (!embed) {
     return (
-      <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-xl border border-white/10 bg-ink-900 text-center">
-        <span className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-ink-850 text-slate-500">
+      <div className="glass flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-3xl text-center">
+        <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] text-slate-400">
           <MonitorOff size={22} strokeWidth={1.8} aria-hidden="true" />
         </span>
         <div className="space-y-1 px-6">
@@ -91,7 +91,7 @@ export default function Player({
   return (
     <div className={className}>
       <div
-        className={`aspect-video w-full overflow-hidden bg-black ring-1 ring-white/10 ${frameClassName}`}
+        className={`aspect-video w-full overflow-hidden border border-white/10 bg-black shadow-glass ${frameClassName}`}
       >
         <iframe
           key={src}
@@ -105,7 +105,7 @@ export default function Player({
       </div>
 
       {usable.length > 1 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="glass mt-3 flex flex-wrap items-center gap-2 rounded-2xl px-3 py-2">
           <span className="label inline-flex items-center gap-1.5">
             <Server size={12} strokeWidth={2.2} aria-hidden="true" />
             Server
