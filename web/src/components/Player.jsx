@@ -132,8 +132,10 @@ export default function Player({
       {current?.playable === false ? (
         <p className="mt-2 inline-flex items-start gap-2 text-[11px] leading-relaxed text-amber-400/90">
           <AlertTriangle size={13} strokeWidth={2.2} className="mt-px shrink-0" aria-hidden="true" />
-          {current.name || 'Server ini'} tidak bisa diputar dari domain relay (dikunci ke
-          donghive.vip). Pilih server lain di atas.
+          <span>
+            <strong className="font-semibold">{current.name || 'Server ini'}</strong> tidak bisa
+            diputar {current.note ? `(${current.note})` : ''}. Pilih server lain di atas.
+          </span>
         </p>
       ) : null}
     </div>

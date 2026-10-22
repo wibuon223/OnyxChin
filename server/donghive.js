@@ -442,18 +442,22 @@ export async function fetchAnimeDetail(slug) {
 const KIND_META = {
   okru: { label: 'OKRU', rank: 0, playable: true, note: '' },
   odysee: { label: 'Odysee', rank: 1, playable: true, note: '' },
+  // DTube jalan (player otomatis fallback nas2 -> nas1). CATATAN: jangan
+  // disimpulkan mati dari curl ke nas2 saja — nas2 balas 404, nas1 normal.
+  dtube: { label: 'DTube', rank: 2, playable: true, note: '' },
   // mega.nz/embed itu file viewer (perlu klik putar/unduh), bukan player
-  // streaming — tapi masih jalan, jadi di atas DTube.
-  mega: { label: 'MEGA', rank: 2, playable: true, note: 'file viewer (klik untuk putar)' },
+  // streaming — masih jalan, tapi di bawah provider yang benar-benar play.
+  mega: { label: 'MEGA', rank: 3, playable: true, note: 'file viewer (klik untuk putar)' },
   other: { label: 'Server lain', rank: 5, playable: true, note: '' },
-  // Diuji 2026-10: master.m3u8 nas2.d.tube balas 404 untuk semua video
-  // yang kita cek, jadi DTube ditandai tidak bisa diputar.
-  dtube: { label: 'DTube', rank: 8, playable: false, note: 'CDN d.tube 404' },
+  // Semua video donghive di Dailymotion bertanda `private: true` di
+  // player/metadata, dan player-nya dikunci ke domain donghive.vip.
+  // Bukan soal proxy/referer — video private tidak bisa diputar dari
+  // luar player pemiliknya. Dibiarkan sebagai opsi terakhir + label jujur.
   dailymotion: {
     label: 'Dailymotion',
     rank: 9,
     playable: false,
-    note: 'dikunci ke donghive.vip',
+    note: 'video private — player dikunci ke donghive.vip',
   },
 }
 
