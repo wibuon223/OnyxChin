@@ -42,6 +42,13 @@ export function navigate(to) {
   window.dispatchEvent(new CustomEvent(NAVIGATE_EVENT, { detail: { path: to } }))
 }
 
+/** Sama seperti navigate(), tapi mengganti entri history (tanpa nambah back-step). */
+export function replaceNavigate(to) {
+  if (typeof to !== 'string' || !to.startsWith('/')) return
+  window.history.replaceState({}, '', to)
+  window.dispatchEvent(new CustomEvent(NAVIGATE_EVENT, { detail: { path: to } }))
+}
+
 export function useRoute() {
   const [state, setState] = useState(() => {
     const parsed = parseLocation(window.location.pathname)

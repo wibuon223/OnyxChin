@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { CalendarDays, ChevronDown, Clock3, Play, Radio, Tv } from 'lucide-react'
 import { fetchAnime } from '../api'
 import EmptyState from '../components/EmptyState'
@@ -9,9 +9,9 @@ import { Skeleton } from '../components/Skeleton'
 import useCachedAsync from '../hooks/useCachedAsync'
 import useHistory from '../hooks/useHistory'
 import useImageSource from '../hooks/useImageSource'
-import { navigate } from '../hooks/useRoute'
+import { navigate, replaceNavigate } from '../hooks/useRoute'
 import { KEY, TTL } from '../lib/keys'
-import { cardSlug, stripHtml } from '../utils'
+import { cardSlug, isEpisodeSlug, stripHtml } from '../utils'
 
 function MetaItem({ label, value }) {
   if (!value) return null
@@ -53,6 +53,19 @@ function DetailSkeleton() {
 export default function AnimeDetail({ slug }) {
   const [expanded, setExpanded] = useState(false)
   const detail = useCachedAsync(KEY.anime(slug), () => fetchAnime(slug), { ttl: TTL.anime })
+
+  const episodic = isEpisodeSlug(slug)
+  const [posterTiny, setPosterTiny] = useState(false)
+
+  // Link lama / hasil "acak" bisa berupa slug episode yang nyasar ke /anime/.
+  // Daripada menampilkan detail kosong (0 episode), lempar ke player-nya.
+  useEffect(() => {
+    if (episodic) replaceNavigate(`/watch/${slug}`)
+  }, [episodic, slug])
+
+  useEffect(() => {
+    setPosterTiny(false)
+  }, [slug])
   const history = useHistory()
 
   const data = detail.data
@@ -69,6 +82,8 @@ export default function AnimeDetail({ slug }) {
   const { src: poster, failed: posterFailed, onError: onPosterError } = useImageSource(
     data?.thumbnail,
   )
+
+  if (episodic) return <DetailSkeleton />
 
   if (detail.loading) {
     return <DetailSkeleton />
@@ -107,19 +122,24 @@ export default function AnimeDetail({ slug }) {
       <div className="flex flex-col gap-6 sm:flex-row sm:gap-8">
         <div className="w-36 shrink-0 sm:w-44 lg:w-56">
           <div className="glass aspect-[2/3] overflow-hidden rounded-3xl p-1.5">
-            {!posterFailed ? (
+            {/* Thumbnail halaman episode kadang cuma ikon 240x240 — fallback
+                tipografi lebih enak dilihat daripada kotak buram. */}
+            {!posterFailed && !posterTiny ? (
               <img
                 src={poster}
                 alt={`Poster ${data.title || 'anime'}`}
                 referrerPolicy="no-referrer"
                 onError={onPosterError}
+                onLoad={(event) => {
+                  if (event.currentTarget.naturalWidth < 320) setPosterTiny(true)
+                }}
                 className="h-full w-full rounded-[1.15rem] object-cover"
               />
             ) : (
               <PosterFallback
                 title={data.title}
                 type={data.type}
-                className="h-full w-full"
+                className="h-full w-full rounded-[1.15rem]"
               />
             )}
           </div>

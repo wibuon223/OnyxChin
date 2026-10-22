@@ -4,8 +4,40 @@ import { fetchHtml } from './fetcher.js'
 
 const UP = CONFIG.upstream
 
+/**
+ * Cloudflare suka membalas halaman challenge (bukan data) kalau terlalu banyak
+ * request beruntun — terutama endpoint pencarian. Deteksi + retry sebentar,
+ * supaya "0 hasil" betul-betul berarti kosong, bukan ke-blok.
+ */
+const CF_MARKERS = [
+  /just a moment/i,
+  /cf-browser-verification/i,
+  /challenge-platform/i,
+  /enable javascript and cookies to continue/i,
+  /attention required/i,
+]
+
+function looksBlocked(html) {
+  if (!html) return true
+  if (html.length < 1500) return true
+  return CF_MARKERS.some((re) => re.test(html))
+}
+
 async function getHtml(url, extraHeaders = {}) {
-  return fetchHtml(url, extraHeaders)
+  let last = ''
+  let lastError = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const html = await fetchHtml(url, extraHeaders)
+      last = html
+      if (!looksBlocked(html)) return html
+    } catch (err) {
+      lastError = err
+    }
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)))
+  }
+  if (last) return last
+  throw lastError || new Error('upstream tidak merespons')
 }
 const text = (node) => (node ? node.text().replace(/\s+/g, ' ').trim() : '')
 const abs = (href, base = UP) => {
@@ -38,6 +70,15 @@ function imgSrc(src, base = UP) {
   return full
 }
 
+/** Ambil URL gambar dari sebuah node; dukung lazy-load (data-src). */
+function imageOf(node) {
+  const img = node.find('img').first()
+  if (!img.length) return ''
+  const raw =
+    img.attr('src') || img.attr('data-src') || img.attr('data-lazy-src') || img.attr('data-original') || ''
+  return imgSrc(raw)
+}
+
 /** Card anime dari <article class="bs"> */
 function parseArticle($, art, section = '') {
   const a = art.find('a.tip').first()
@@ -58,8 +99,7 @@ function parseArticle($, art, section = '') {
     series = parts.join(' ').replace(/\s+/g, ' ').trim()
   }
 
-  const img = art.find('img.ts-post-image, img.wp-post-image, img').first()
-  const thumb = imgSrc(img.attr('src'))
+  const thumb = imageOf(art)
 
   return {
     title,
@@ -282,30 +322,38 @@ export async function fetchListing(baseUrl, { page = 1, maxPages = 1, section = 
   const items = []
   let current = baseUrl
   let totalPages = 1
+  let blocked = false
 
   for (let p = 1; p <= maxPages; p += 1) {
     const target = p === 1 ? current : current
     const html = await getHtml(target)
     const $ = cheerio.load(html)
+    blocked = looksBlocked(html) && !$('article.bs').length && !$('.listupd').length
 
     const cards = []
     $('article.bs').each((_, art) => {
       const c = parseArticle($, $(art), `${section} (p${p})`)
       if (c) cards.push(c)
     })
-
+    // Kalau tidak ada <article class="bs">, jangan pernah jatuh ke sidebar:
+    // halaman "Not Found" punya puluhan link sidebar tanpa poster, dan itu
+    // yang dulu bikin hasil pencarian berisi judul acak + gambar kosong.
     if (!cards.length) {
-      $('h2 a[href], h3 a[href], .serieslist h4 a[href]').each((_, el) => {
+      const scope = $('.listupd').first()
+      const anchors = scope.find('a.tip[href], .bsx > a[href]')
+      if (!scope.length || !anchors.length) break
+      anchors.each((_, el) => {
         const a = $(el)
+        const card = a.closest('article.bs, .bsx')
         cards.push({
           title: text(a) || a.attr('title') || '',
           url: abs(a.attr('href')),
           slug: slugify(a.attr('href')),
           section: `${section} (p${p})`,
-          type: '',
-          episode: '',
-          subtitle: '',
-          thumbnail: '',
+          type: text(card.find('div.typez').first()),
+          episode: text(card.find('span.epx').first()),
+          subtitle: text(card.find('span.sb').first()),
+          thumbnail: imageOf(card.length ? card : a),
           series: '',
           rank: '',
           genres: [],
@@ -327,7 +375,7 @@ export async function fetchListing(baseUrl, { page = 1, maxPages = 1, section = 
     }
   }
 
-  return { page, total_pages: totalPages, items: dedupe(items) }
+  return { page, total_pages: totalPages, items: dedupe(items), blocked }
 }
 
 export const fetchViewAll = (opts) =>
@@ -339,9 +387,92 @@ export const fetchGenrePage = (slug, opts) =>
     ...opts,
   })
 
-export const fetchSearch = (query, opts) =>
-  fetchListing(`${UP}/?s=${encodeURIComponent(query)}`, { section: `Search/${query}`, ...opts })
+/**
+ * Pencarian situs (`?s=`) itu exact-ish: typo satu huruf langsung "Not Found".
+ * Kalau kosong, coba potong 1–3 huruf dari belakang ("regenade" → "renegad")
+ * dan tandai `suggestion` supaya UI bisa bilang "nggak ada hasil persis,
+ * ini yang mirip".
+ */
+export async function fetchSearch(query, opts = {}) {
+  const q = String(query || '').trim()
+  const section = `Search/${q}`
+  const direct = await fetchListing(`${UP}/?s=${encodeURIComponent(q)}`, { section, ...opts })
+  if (direct.items.length || q.length < 6) {
+    return { ...direct, suggestion: '', suggestions: direct.items.length ? [] : await suggestionsFor(q) }
+  }
 
+  // Challenge Cloudflare bukan berarti "tidak ada hasil".
+  if (direct.blocked) {
+    const err = new Error('Pencarian ditolak upstream (Cloudflare). Coba lagi sebentar.')
+    err.status = 503
+    throw err
+  }
+
+  // Pencarian situs strict substring; typo tidak akan ketemu walau diulang.
+  // Jadi jangan buang waktu retry — langsung tawarkan judul yang mirip.
+  return { ...direct, suggestion: '', suggestions: await suggestionsFor(q) }
+}
+
+
+/* ── saran judul saat pencarian kosong ─────────────────────────────
+ * Pencarian situs itu substring strict: "regenade" (huruf tertukar) = 0 hasil.
+ * Daripada menyerah, cocokkan query dengan judul populer pakai trigram.
+ */
+let homeFlatCache = { at: 0, items: [] }
+
+async function popularTitles() {
+  if (Date.now() - homeFlatCache.at < 5 * 60_000 && homeFlatCache.items.length) {
+    return homeFlatCache.items
+  }
+  try {
+    const home = await fetchHome()
+    // Hanya serial, bukan episode: slug episode punya halaman detail kosong.
+    const items = (home.flat || []).filter(
+      (it) => it.slug && it.title && !/-episode-\d+/i.test(it.slug),
+    )
+    homeFlatCache = { at: Date.now(), items }
+    return items
+  } catch {
+    return homeFlatCache.items
+  }
+}
+
+function trigrams(value) {
+  const s = ` ${String(value || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()} `
+  const out = new Set()
+  for (let i = 0; i < s.length - 2; i += 1) out.add(s.slice(i, i + 3))
+  return out
+}
+
+function similarity(a, b) {
+  const A = trigrams(a)
+  const B = trigrams(b)
+  if (!A.size || !B.size) return 0
+  let shared = 0
+  for (const g of A) if (B.has(g)) shared += 1
+  return shared / (A.size + B.size - shared)
+}
+
+async function suggestionsFor(query, limit = 6) {
+  const pool = await popularTitles()
+  const bySlug = new Map()
+
+  for (const item of pool) {
+    if (!item.slug) continue
+    const score = similarity(query, item.title)
+    if (score < 0.1) continue
+    const prev = bySlug.get(item.slug)
+    // Satu judul bisa muncul dari beberapa section; simpan yang punya poster.
+    if (!prev || (!prev.thumbnail && item.thumbnail) || item.score > prev.score) {
+      bySlug.set(item.slug, { ...item, score })
+    }
+  }
+
+  return [...bySlug.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ score, section, rank, genres, ...rest }) => rest)
+}
 export async function fetchGenres() {
   const $ = cheerio.load(await getHtml(UP))
   const genres = []

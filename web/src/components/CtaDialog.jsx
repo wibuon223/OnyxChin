@@ -5,12 +5,9 @@ import useCachedAsync from '../hooks/useCachedAsync'
 import useHistory from '../hooks/useHistory'
 import { navigate } from '../hooks/useRoute'
 import { KEY, TTL } from '../lib/keys'
+import { isEpisodeSlug } from '../utils'
 import Modal from './Modal'
 
-function go(path, onClose) {
-  onClose?.()
-  navigate(path)
-}
 
 export default function CtaDialog({ open, onClose }) {
   const [query, setQuery] = useState('')
@@ -23,7 +20,9 @@ export default function CtaDialog({ open, onClose }) {
   const home = useCachedAsync(KEY.home, fetchHome, { ttl: TTL.home, enabled: open })
   const pool = useMemo(() => {
     const flat = home.data?.flat
-    return Array.isArray(flat) ? flat.filter((it) => it.slug) : []
+    // "Acak judul" harus memilih serial, bukan episode — slug episode
+    // (`...-episode-387-...`) punya halaman detail kosong.
+    return Array.isArray(flat) ? flat.filter((it) => it.slug && !isEpisodeSlug(it.slug)) : []
   }, [home.data])
 
   useEffect(() => {
@@ -72,7 +71,12 @@ export default function CtaDialog({ open, onClose }) {
   const surprise = () => {
     if (!pool.length) return
     const pick = pool[Math.floor(Math.random() * pool.length)]
-    go(`/anime/${pick.slug}`, onClose)
+    go(isEpisodeSlug(pick.slug) ? `/watch/${pick.slug}` : `/anime/${pick.slug}`, onClose)
+  }
+
+  const openResult = (slug) => {
+    if (!slug) return
+    go(isEpisodeSlug(slug) ? `/watch/${slug}` : `/anime/${slug}`, onClose)
   }
 
   const recent = history.items.slice(0, 3)
@@ -121,7 +125,7 @@ export default function CtaDialog({ open, onClose }) {
               <button
                 key={slug || item.title}
                 type="button"
-                onClick={() => go(`/anime/${slug}`, onClose)}
+                onClick={() => openResult(slug)}
                 className="group flex w-full items-center gap-3 rounded-2xl border border-transparent px-3 py-2 text-left transition hover:border-white/10 hover:bg-white/[0.05]"
               >
                 <span className="line-clamp-1 flex-1 text-[13px] font-semibold text-slate-200 group-hover:text-white">

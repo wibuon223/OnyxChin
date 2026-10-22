@@ -27,19 +27,20 @@ export function SearchResults({ query }) {
     () => fetchSearch(trimmed, 1),
     { ttl: TTL.search, enabled: Boolean(trimmed) },
   )
-
   const items = search.data?.items || []
+  const suggestion = search.data?.suggestion || ''
+  const suggestions = search.data?.suggestions || []
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
       <span className="eyebrow">Hasil pencarian</span>
-      <h1 className="display-1 mt-4">
-        {trimmed ? `“${trimmed}”` : 'Cari judul'}
-      </h1>
+      <h1 className="display-1 mt-4">{trimmed ? `“${trimmed}”` : 'Cari judul'}</h1>
       <p className="prose-muted mt-2">
         {search.loading
           ? 'Mencari…'
-          : `${items.length} judul ketemu${trimmed ? ` untuk “${trimmed}”` : ''}.`}
+          : suggestion
+            ? `Nggak ada hasil persis untuk “${trimmed}” — ini yang paling mirip (“${suggestion}”).`
+            : `${items.length} judul ketemu${trimmed ? ` untuk “${trimmed}”` : ''}.`}
       </p>
 
       <div className="mt-8">
@@ -49,6 +50,15 @@ export function SearchResults({ query }) {
           <PosterGrid loading skeletonCount={12} />
         ) : items.length ? (
           <PosterGrid items={items} />
+        ) : suggestions.length ? (
+          <div className="space-y-4">
+            <div className="glass rounded-2xl px-4 py-3">
+              <p className="text-[13px] text-slate-300">
+                Nggak ada yang cocok persis. Mungkin maksudmu salah satu ini:
+              </p>
+            </div>
+            <PosterGrid items={suggestions} />
+          </div>
         ) : (
           <EmptyState
             title="Nggak ada hasil"
