@@ -143,6 +143,14 @@ export default function Player({
             diputar {current.note ? `(${current.note})` : ''}. Pilih server lain di atas.
           </span>
         </p>
+      ) : current?.fallback ? (
+        <p className="mt-2 inline-flex items-start gap-2 text-[11px] leading-relaxed text-amber-400/90">
+          <AlertTriangle size={13} strokeWidth={2.2} className="mt-px shrink-0" aria-hidden="true" />
+          <span>
+            Episode ini cuma punya satu mirror.{' '}
+            {current.note ? `${current.note}.` : ''} Kalau gagal, coba episode lain.
+          </span>
+        </p>
       ) : null}
     </div>
   )

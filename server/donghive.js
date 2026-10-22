@@ -480,9 +480,26 @@ function providerKind(url) {
   return 'other'
 }
 
-/** Decode semua mirror server dari <select class="mirror">. */
+/**
+ * Provider yang sudah dipastikan tidak bisa diputar dari relay dan sengaja
+ * TIDAK ditampilkan. Dailymotion: video private + player dikunci ke domain
+ * donghive.vip; dari origin lain selalu "This video cannot be played on this
+ * site" (lihat tools/origin-spoof kalau suatu saat mau dipakai lagi).
+ */
+const HIDDEN_KINDS = new Set(['dailymotion'])
+
+/**
+ * Decode semua mirror server dari <select class="mirror">.
+ *
+ * Dailymotion disembunyikan (lihat HIDDEN_KINDS), TAPI kalau sebuah episode
+ * cuma punya DM — dan itu terjadi di ~23% episode — DM dikembalikan sebagai
+ * jaring penyelamat supaya halamannya tidak kosong melompong. UI menandainya
+ * `fallback: true` + catatan jujur.
+ */
 export function parseServers($) {
-  const found = []
+  const all = []
+  const seen = new Set()
+
   $('select.mirror option').each((_, el) => {
     const raw = ($(el).attr('value') || '').trim()
     if (!raw) return
@@ -495,11 +512,14 @@ export function parseServers($) {
     const m = decoded.match(/src=["']([^"']+)["']/i)
     if (!m) return
     const url = abs(m[1].replace(/&amp;/g, '&'), UP)
+    // <select> kadang memuat mirror kembar (host sama, URL sama) — dedupe.
+    if (seen.has(url)) return
+    seen.add(url)
     const kind = providerKind(url)
     const meta = KIND_META[kind] || KIND_META.other
     // Label upstream sering salah platform (mis. "Odysee" padahal mega.nz),
     // jadi untuk kind yang dikenal pakai label kanonik kita.
-    found.push({
+    all.push({
       name: kind === 'other' ? text($(el)) || meta.label : meta.label,
       kind,
       url,
@@ -509,7 +529,21 @@ export function parseServers($) {
       rank: meta.rank,
     })
   })
-  return found.sort((a, b) => a.rank - b.rank).map(({ rank, ...rest }) => rest)
+
+  const sort = (list) => list.sort((a, b) => a.rank - b.rank).map(({ rank, ...rest }) => rest)
+  const visible = all.filter((s) => !HIDDEN_KINDS.has(s.kind))
+  if (visible.length) return sort(visible)
+
+  return sort(
+    all
+      .filter((s) => HIDDEN_KINDS.has(s.kind))
+      .map((s) => ({
+        ...s,
+        name: `${s.name} (fallback)`,
+        fallback: true,
+        note: 'satu-satunya mirror untuk episode ini — player dikunci domain donghive.vip, kemungkinan gagal',
+      })),
+  )
 }
 
 export async function fetchEpisodePage(slug) {
