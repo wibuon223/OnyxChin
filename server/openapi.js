@@ -87,6 +87,33 @@ export function buildOpenApi({ origin, version }) {
             embed: { type: 'string', description: 'URL absolut ke halaman bridge' },
             direct_url: { type: 'string', format: 'uri', description: 'URL player sumber (mentah)' },
             video_id: { type: 'string' },
+            default_server: {
+              type: 'string',
+              description: 'kind server yang dipakai default (yang bisa diputar)',
+              example: 'okru',
+            },
+            servers: {
+              type: 'array',
+              description:
+                'Daftar mirror dari <select class="mirror"> upstream, urut dari yang paling bisa diputar',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', example: 'OKRU' },
+                  kind: {
+                    type: 'string',
+                    enum: ['okru', 'odysee', 'mega', 'dtube', 'dailymotion', 'other'],
+                  },
+                  url: { type: 'string', format: 'uri' },
+                  playable: {
+                    type: 'boolean',
+                    description:
+                      'false kalau provider tidak bisa diputar dari domain relay (DM dikunci domain, DTube CDN 404)',
+                  },
+                  note: { type: 'string' },
+                },
+              },
+            },
             downloads: { type: 'array', items: { type: 'object' } },
             description: { type: 'string' },
           },
