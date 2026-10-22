@@ -12,6 +12,104 @@ const DM_API_HOSTS = [
   'https://s2.dmcdn.net',
 ]
 
+/**
+ * Shim "origin spoofing" untuk player Dailymotion.
+ *
+ * Player menentukan embedder lewat `window.top.location.href` (cross-origin →
+ * throw) lalu fallback ke `location.ancestorOrigins`. Karena kita menyajikan
+ * dokumen player dari domain sendiri, ancestorOrigins = domain relay, dan DM
+ * menolak ("This video cannot be played on this site").
+ *
+ * Shim ini dijalankan SEBELUM bundle player, jadi saat player membaca
+ * embedder ia melihat `https://donghive.vip` — sama seperti di situs aslinya.
+ * Ini murni lapisan klien: tidak menyentuh akun/konten siapa pun.
+ */
+const ORIGIN_SHIM = `<script>
+(function () {
+  var HOST = 'donghive.vip'
+  var HREF = 'https://donghive.vip/'
+  try {
+    var origins = ['https://donghive.vip']
+    Object.defineProperty(origins, 'item', { value: function (i) { return this[i] || null } })
+    Object.defineProperty(origins, 'contains', { value: function (v) { return this.indexOf(v) > -1 } })
+    Object.defineProperty(Location.prototype, 'ancestorOrigins', {
+      configurable: true,
+      get: function () { return origins },
+    })
+  } catch (e) {}
+  try {
+    Object.defineProperty(Document.prototype, 'referrer', {
+      configurable: true,
+      get: function () { return HREF },
+    })
+  } catch (e) {}
+  try {
+    // Beberapa jalur kode membaca location.hostname/host untuk cek domain.
+    var loc = window.location
+    var fake = {
+      hostname: HOST, host: HOST, origin: 'https://' + HOST, href: HREF,
+      protocol: 'https:', port: '', pathname: loc.pathname, search: loc.search, hash: loc.hash,
+    }
+    ;['hostname', 'host', 'origin'].forEach(function (k) {
+      try {
+        Object.defineProperty(loc, k, { configurable: true, get: function () { return fake[k] } })
+      } catch (e) {}
+    })
+  } catch (e) {}
+  try {
+    // Semua request media DM (manifest + segment + API) dibelokkan ke proxy
+    // kita, supaya server DM melihat Referer/Origin donghive.vip — persis
+    // seperti saat player asli ditanam di situsnya.
+    var RELAY = window.location.origin
+    var DM_RE = /^https?:\/\/([a-z0-9-]+\.)*(dailymotion\.com|dmcdn\.net|dm-event\.net)\//i
+    function wrap(u) {
+      try {
+        return DM_RE.test(u) ? RELAY + '/api/proxy?u=' + encodeURIComponent(u) : u
+      } catch (e) {
+        return u
+      }
+    }
+    var realFetch = window.fetch
+    if (realFetch) {
+      window.fetch = function (input, init) {
+        try {
+          if (typeof input === 'string') input = wrap(input)
+          else if (input && input.url) input = new Request(wrap(input.url), input)
+        } catch (e) {}
+        return realFetch.call(this, input, init)
+      }
+    }
+    var realOpen = XMLHttpRequest.prototype.open
+    XMLHttpRequest.prototype.open = function () {
+      var args = [].slice.call(arguments)
+      try {
+        args[1] = wrap(String(args[1]))
+      } catch (e) {}
+      return realOpen.apply(this, args)
+    }
+  } catch (e) {}
+  try {
+    // hls.js DM jalan di Web Worker → hook di atas tidak menjangkau. Service
+    // worker yang mencegat, jadi semua trafik media tetap lewat relay.
+    if (navigator.serviceWorker) {
+      // <base href> menunjuk ke geo.dailymotion.com → URL relatif akan salah
+      // origin. Pakai origin relay secara eksplisit.
+      navigator.serviceWorker
+        .register(window.location.origin + '/sw-dm.js')
+        .then(function () {
+          try {
+            if (!navigator.serviceWorker.controller && !sessionStorage.getItem('swdm-reload')) {
+              sessionStorage.setItem('swdm-reload', '1')
+              location.reload()
+            }
+          } catch (e) {}
+        })
+        .catch(function () {})
+    }
+  } catch (e) {}
+})()
+</script>`
+
 /* ───────────────────────── cache ───────────────────────── */
 
 const videoCache = new Map()
@@ -68,14 +166,71 @@ export async function resolveVideo(slug) {
 
 /* ───────────────────────── reverse proxy ───────────────────────── */
 
+/** Domain DM yang boleh dilewatkan proxy: host persis ATAU subdomain. */
+const PROXY_SUFFIXES = ['.dailymotion.com', '.dmcdn.net', '.dm-event.net']
+const PROXY_EXACT = new Set([...CONFIG.proxyAllowlist, 'dailymotion.com', 'dmcdn.net'])
+
 export function isAllowedProxyUrl(raw) {
   try {
     const u = new URL(raw)
     if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
-    return CONFIG.proxyAllowlist.includes(u.hostname)
+    if (PROXY_EXACT.has(u.hostname)) return true
+    return PROXY_SUFFIXES.some((s) => u.hostname.endsWith(s))
   } catch {
     return false
   }
+}
+
+/** Bungkus URL absolut jadi lewat proxy kita. */
+function proxify(absUrl, origin) {
+  return `${origin}/api/proxy?u=${encodeURIComponent(absUrl)}`
+}
+
+/* ───────────────── cookie jar Dailymotion ─────────────────
+ * Player DM memakai cookie sesi (dmvk/ts/…). Karena dokumen player disajikan
+ * dari origin relay, browser tidak pernah menyimpan cookie dailymotion.com —
+ * jadi relay yang menyimpannya dan mengirimkannya ke upstream. Tanpa ini
+ * manifest balik 403 dan player berhenti di "Loading".
+ */
+const dmJar = new Map()
+
+function storeUpstreamCookies(headers) {
+  const list = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : []
+  for (const raw of list) {
+    const pair = String(raw).split(';')[0]
+    const eq = pair.indexOf('=')
+    if (eq > 0) dmJar.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim())
+  }
+}
+
+function cookieHeaderFor(host) {
+  const own = []
+  for (const [k, v] of dmJar) own.push(`${k}=${v}`)
+  return own.join('; ')
+}
+
+/**
+ * HLS manifest: setiap URI (segment, key, init map) harus ikut lewat proxy,
+ * kalau tidak hls.js akan menariknya langsung dari dmcdn dengan Referer kosong
+ * → 403 dan video stuck di "Loading".
+ */
+function rewriteM3u8(body, manifestUrl, origin) {
+  const abs = (u) => {
+    try {
+      return proxify(new URL(u, manifestUrl).toString(), origin)
+    } catch {
+      return u
+    }
+  }
+  return body
+    .split('\n')
+    .map((line) => {
+      const t = line.trim()
+      if (!t) return line
+      if (t.startsWith('#')) return line.replace(/URI="([^"]+)"/g, (_m, u) => `URI="${abs(u)}"`)
+      return abs(t)
+    })
+    .join('\n')
 }
 
 /** Rewrite URL absolut dailymotion/dmcdn → lewat proxy kita. */
@@ -115,16 +270,41 @@ export async function proxyAsset(req, res, rawUrl) {
     res.status(403).json({ error: 'host tidak diizinkan' })
     return
   }
+  const origin = originOf(req)
+  const isManifest = /\.m3u8($|\?)/i.test(target.pathname) || /mpegurl/i.test(String(req.headers.accept || ''))
   try {
-    const { buffer, contentType } = await fetchBinary(target.toString(), {
+    const headers = {
       Referer: CONFIG.upstreamReferer,
-      Origin: 'https://geo.dailymotion.com',
-    })
+      Origin: 'https://donghive.vip',
+      Accept: '*/*',
+    }
+    const range = req.headers.range
+    if (range) headers.Range = range
+    const cookie = cookieHeaderFor(target.hostname)
+    if (cookie) headers.Cookie = cookie
 
-    res.setHeader('Content-Type', contentType)
+    const upstream = await fetchUpstream(target.toString(), { headers })
+    storeUpstreamCookies(upstream.headers)
+    const contentType = upstream.headers.get('content-type') || 'application/octet-stream'
+
     res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Accept-Ranges', 'bytes')
+
+    if (isManifest) {
+      const text = await upstream.text()
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8')
+      // manifest harus selalu segar — kalau di-cache, token/sesi HLS bisa basi
+      res.setHeader('Cache-Control', 'no-store')
+      res.status(upstream.status === 206 ? 200 : upstream.status).send(rewriteM3u8(text, target.toString(), origin))
+      return
+    }
+
+    const buffer = Buffer.from(await upstream.arrayBuffer())
+    res.setHeader('Content-Type', contentType)
     res.setHeader('Cache-Control', 'public, max-age=3600')
-    res.send(buffer)
+    const cr = upstream.headers.get('content-range')
+    if (cr) res.setHeader('Content-Range', cr)
+    res.status(upstream.status).send(buffer)
   } catch (err) {
     res.status(502).json({ error: `proxy gagal: ${err.message}` })
   }
@@ -136,7 +316,9 @@ export async function proxyAsset(req, res, rawUrl) {
  */
 export async function proxyPlayer(req, res, videoId) {
   const origin = originOf(req)
-  const target = `${DM_PLAYER_BASE}?video=${encodeURIComponent(videoId)}`
+  // ads=false: iklan DM memanggil domain terpisah (cdndirector/dm-event) yang
+  // sering gagal di konteks proxy dan mematikan playback utama.
+  const target = `${DM_PLAYER_BASE}?video=${encodeURIComponent(videoId)}&ads=false&mute=false&ui=video`
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), CONFIG.requestTimeoutMs)
   try {
@@ -146,17 +328,30 @@ export async function proxyPlayer(req, res, videoId) {
         Referer: 'https://geo.dailymotion.com/',
       },
     })
+    // Cookie sesi DM di-set di response dokumen player — simpan ke jar relay.
+    storeUpstreamCookies(upstream.headers)
+
     const html = await upstream.text()
     let out = rewriteToProxy(html, origin)
+    // Matikan iklan di config player (bukan cuma query param): request iklan
+    // ke cdndirector/dm-event gagal di konteks proxy dan mematikan playback.
+    out = out
+      .replace(/"enable_ads":\s*true/g, '"enable_ads":false')
+      .replace(/"enableAds":\s*true/g, '"enableAds":false')
+      .replace(/"enable_preload":\s*true/g, '"enable_preload":false')
     out = out.replace(
       '<head>',
-      `<head>\n    <base href="https://geo.dailymotion.com/">\n    <meta name="referrer" content="no-referrer">`,
+      `<head>\n    ${ORIGIN_SHIM}\n    <base href="https://geo.dailymotion.com/">\n    <meta name="referrer" content="no-referrer">`,
     )
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
     res.setHeader('Cache-Control', 'public, max-age=600')
     res.send(out)
   } catch (err) {
-    res.status(502).send(`<!doctype html><meta charset="utf-8"><body style="font:14px system-ui;background:#07090f;color:#e2e8f0;padding:24px">Bridge gagal: ${err.message}</body>`)
+    res
+      .status(502)
+      .send(
+        `<!doctype html><meta charset="utf-8"><body style="font:14px system-ui;background:#07090f;color:#e2e8f0;padding:24px">Bridge gagal: ${escapeHtml(err.message)}</body>`,
+      )
   } finally {
     clearTimeout(timer)
   }

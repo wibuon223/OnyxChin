@@ -232,6 +232,16 @@ app.get(
   }),
 )
 
+/* Service worker: satu-satunya lapisan yang bisa mencegat request media dari
+   Web Worker hls.js. Tanpa ini, manifest/segment DM tetap keluar langsung
+   dengan Referer kosong lalu ditolak 403. */
+app.get('/sw-dm.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Service-Worker-Allowed', '/')
+  res.sendFile(path.join(__dirname, 'sw-dm.js'))
+})
+
 /* ───────────────────────── docs ───────────────────────── */
 
 const spec = buildOpenApi({ origin: process.env.PUBLIC_ORIGIN || 'http://localhost:8080', version: CONFIG.version })
