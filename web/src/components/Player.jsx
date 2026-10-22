@@ -51,14 +51,17 @@ export default function Player({
     }
   })
 
-  // pilihan tersimpan hanya dipakai kalau server itu ada di episode ini
+  // Pilihan tersimpan hanya dipakai kalau server itu ada di episode ini dan
+  // bukan `experimental` — kalau tidak, sekali klik Dailymotion bikin semua
+  // episode berikutnya ikut mendarat di mirror paling rapuh.
   const active = useMemo(() => {
-    if (picked && usable.some((s) => s.kind === picked)) return picked
+    const saved = picked && usable.find((s) => s.kind === picked)
+    if (saved && !saved.experimental) return picked
     return fallback
   }, [picked, usable, fallback])
 
   useEffect(() => {
-    if (!active) return
+    if (!active || active === 'dailymotion') return
     try {
       localStorage.setItem(STORAGE_KEY, active)
     } catch {
