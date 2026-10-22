@@ -1,5 +1,6 @@
 import { CONFIG, absolute, originOf } from './config.js'
-import { fetchEpisodePage, extractVideoId } from './donghive.js'
+import { extractVideoId } from './donghive.js'
+import { source } from './scraper.js'
 import { fetchBinary, fetchUpstream } from './fetcher.js'
 
 const DM_PLAYER_BASE = 'https://geo.dailymotion.com/player/xhojl.html'
@@ -139,24 +140,26 @@ function cacheSet(key, value, ttl = CONFIG.videoCacheTtlMs) {
  * Resolusi slug episode donghive → video id dailymotion.
  * accepts: "jade-dynasty-episode-90-subtitle-indonesia" atau "v/<videoId>".
  */
-export async function resolveVideo(slug) {
+export async function resolveVideo(slug, srcId = 'donghive') {
+  const scraper = source(srcId)
   const clean = String(slug).replace(/^\/+/, '')
-  const cached = cacheGet(`vid:${clean}`)
+  const cacheKey = `vid:${srcId}:${clean}`
+  const cached = cacheGet(cacheKey)
   if (cached) return cached
 
   if (clean.startsWith('v/')) {
     const id = clean.slice(2)
-    return cacheSet(`vid:${clean}`, { video_id: id, direct_url: `${DM_PLAYER_BASE}?video=${id}` })
+    return cacheSet(cacheKey, { video_id: id, direct_url: `${DM_PLAYER_BASE}?video=${id}` })
   }
 
-  const page = await fetchEpisodePage(clean)
+  const page = await scraper.fetchEpisodePage(clean)
   const id = page.video_id || extractVideoId(page.embed_src)
   if (!id) {
     const err = new Error(`tidak ada video id untuk ${clean}`)
     err.status = 404
     throw err
   }
-  return cacheSet(`vid:${clean}`, {
+  return cacheSet(cacheKey, {
     video_id: id,
     direct_url: `${DM_PLAYER_BASE}?video=${id}`,
     title: page.title,
@@ -406,6 +409,7 @@ const BRIDGE_CSS = `
  */
 export async function bridgePage(req, res, slug, opts = {}) {
   const origin = originOf(req)
+  const srcId = String(opts.srcId || req.query.src || 'donghive')
   const title = opts.title || 'Donghive Relay'
   const wantServer = String(req.query.server || '').toLowerCase()
   // ?bar=0 → dipakai saat halaman ini di-embed di situs kita sendiri
@@ -415,7 +419,7 @@ export async function bridgePage(req, res, slug, opts = {}) {
   let page = null
   let videoId = ''
   try {
-    page = await fetchEpisodePage(slug)
+    page = await source(srcId).fetchEpisodePage(slug)
     videoId = page.video_id || ''
   } catch (err) {
     page = null

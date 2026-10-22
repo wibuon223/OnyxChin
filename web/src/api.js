@@ -1,3 +1,5 @@
+import { getSource } from './lib/source'
+
 const BASE = '/api'
 const TIMEOUT_MS = 20000
 
@@ -26,7 +28,8 @@ async function readError(res) {
 }
 
 async function getJSON(path, params) {
-  const url = `${BASE}${path}${buildQuery(params)}`
+  // Semua request katalog ikut membawa sumber aktif.
+  const url = `${BASE}${path}${buildQuery({ ...params, src: getSource() })}`
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   try {

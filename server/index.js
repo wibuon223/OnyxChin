@@ -7,15 +7,7 @@ import fs from 'node:fs'
 import swaggerUi from 'swagger-ui-express'
 
 import { CONFIG, absolute, originOf } from './config.js'
-import {
-  fetchHome,
-  fetchViewAll,
-  fetchGenrePage,
-  fetchGenres,
-  fetchSearch,
-  fetchAnimeDetail,
-  fetchEpisodePage,
-} from './donghive.js'
+import { SOURCES, source } from './scraper.js'
 import { bridgePage, proxyAsset, proxyPlayer, resolveVideo } from './bridge.js'
 import { buildOpenApi } from './openapi.js'
 
@@ -48,6 +40,11 @@ function absolutizeDeep(value, req) {
   }
   return value
 }
+/** Sumber aktif: ?src=anichin | donghive (default donghive). */
+function pickSource(req) {
+  return source(String(req.query.src || req.headers['x-source'] || 'donghive'))
+}
+
 function intParam(value, fallback, max = 50) {
   const n = Number.parseInt(value, 10)
   if (!Number.isFinite(n) || n < 1) return fallback
@@ -92,7 +89,15 @@ app.get('/api/config', (req, res) => {
   res.json({
     upstream: CONFIG.upstream,
     version: CONFIG.version,
+    sources: Object.entries(SOURCES).map(([id, v]) => ({ id, base: v.base })),
     proxy_allowlist: CONFIG.proxyAllowlist,
+  })
+})
+
+app.get('/api/sources', (req, res) => {
+  res.json({
+    default: 'donghive',
+    sources: Object.entries(SOURCES).map(([id, v]) => ({ id, base: v.base })),
   })
 })
 
@@ -101,7 +106,8 @@ app.get('/api/config', (req, res) => {
 app.get(
   '/api/home',
   asyncRoute(async (req, res) => {
-    const data = await cached('home', HOME_TTL, () => fetchHome())
+    const src = pickSource(req)
+    const data = await cached(`home:${src.base}`, HOME_TTL, () => src.fetchHome())
     res.json(absolutizeDeep(data, req))
   }),
 )
@@ -109,15 +115,18 @@ app.get(
 app.get(
   '/api/anime',
   asyncRoute(async (req, res) => {
+    const src = pickSource(req)
     const page = intParam(req.query.page, 1, 500)
     const maxPages = intParam(req.query.max_pages, 1, 20)
-    const data = await cached(`anime:${page}:${maxPages}`, LIST_TTL, () => fetchViewAll({ page, maxPages }))
+    const data = await cached(`anime:${src.base}:${page}:${maxPages}`, LIST_TTL, () =>
+      src.fetchViewAll({ page, maxPages }),
+    )
     // Arsip /anime/ tidak mencantumkan jumlah halaman, jadi intip halaman
     // berikutnya sekali (di-cache) supaya tombol "Berikutnya" tahu kapan stop.
     let hasNext = data.items.length > 0
     if (page < 400) {
-      const peek = await cached(`anime:peek:${page + 1}`, LIST_TTL, () =>
-        fetchViewAll({ page: page + 1, maxPages: 1 }),
+      const peek = await cached(`anime:peek:${src.base}:${page + 1}`, LIST_TTL, () =>
+        src.fetchViewAll({ page: page + 1, maxPages: 1 }),
       )
       hasNext = peek.items.length > 0
     }
@@ -137,10 +146,11 @@ app.get(
 app.get(
   '/api/genre/:slug',
   asyncRoute(async (req, res) => {
+    const src = pickSource(req)
     const page = intParam(req.query.page, 1, 500)
     const maxPages = intParam(req.query.max_pages, 1, 20)
-    const data = await cached(`genre:${req.params.slug}:${page}:${maxPages}`, LIST_TTL, () =>
-      fetchGenrePage(req.params.slug, { page, maxPages }),
+    const data = await cached(`genre:${src.base}:${req.params.slug}:${page}:${maxPages}`, LIST_TTL, () =>
+      src.fetchGenrePage(req.params.slug, { page, maxPages }),
     )
     res.json(absolutizeDeep(data, req))
   }),
@@ -149,7 +159,8 @@ app.get(
 app.get(
   '/api/genres',
   asyncRoute(async (req, res) => {
-    res.json(await cached('genres', LIST_TTL, () => fetchGenres()))
+    const src = pickSource(req)
+    res.json(await cached(`genres:${src.base}`, LIST_TTL, () => src.fetchGenres()))
   }),
 )
 
@@ -161,8 +172,11 @@ app.get(
       res.status(400).json({ error: 'parameter q wajib diisi' })
       return
     }
+    const src = pickSource(req)
     const page = intParam(req.query.page, 1, 500)
-    const data = await cached(`search:${q}:${page}`, LIST_TTL, () => fetchSearch(q, { page }))
+    const data = await cached(`search:${src.base}:${q}:${page}`, LIST_TTL, () =>
+      src.fetchSearch(q, { page }),
+    )
     res.json(absolutizeDeep({ query: q, ...data }, req))
   }),
 )
@@ -172,8 +186,9 @@ app.get(
 app.get(
   '/api/anime/:slug',
   asyncRoute(async (req, res) => {
-    const data = await cached(`detail:${req.params.slug}`, DETAIL_TTL, () =>
-      fetchAnimeDetail(req.params.slug),
+    const src = pickSource(req)
+    const data = await cached(`detail:${src.base}:${req.params.slug}`, DETAIL_TTL, () =>
+      src.fetchAnimeDetail(req.params.slug),
     )
     res.json(absolutizeDeep(data, req))
   }),
@@ -182,15 +197,16 @@ app.get(
 app.get(
   '/api/episode/:slug',
   asyncRoute(async (req, res) => {
-    const page = await cached(`episode:${req.params.slug}`, DETAIL_TTL, () =>
-      fetchEpisodePage(req.params.slug),
+    const src = pickSource(req)
+    const page = await cached(`episode:${src.base}:${req.params.slug}`, DETAIL_TTL, () =>
+      src.fetchEpisodePage(req.params.slug),
     )
     const origin = originOf(req)
     const resolved = await resolveVideo(req.params.slug).catch(() => null)
 
     const payload = {
       ...page,
-      embed: absolute(req, `/e/${req.params.slug}`),
+      embed: absolute(req, `/e/${req.params.slug}?src=${encodeURIComponent(String(req.query.src || 'donghive'))}`),
       direct_url: resolved?.direct_url || page.embed_src || '',
       video_id: resolved?.video_id || page.video_id || '',
     }
@@ -221,7 +237,8 @@ app.get(
   asyncRoute(async (req, res) => {
     await bridgePage(req, res, req.params.slug, {
       mode: String(req.query.mode || 'bridge'),
-      title: String(req.query.title || 'Donghive Relay'),
+      title: String(req.query.title || 'OnyxChin'),
+      srcId: String(req.query.src || 'donghive'),
     })
   }),
 )

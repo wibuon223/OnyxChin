@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import useHistory from '../hooks/useHistory'
 import { navigate } from '../hooks/useRoute'
+import { SOURCES, getSource, setSource, sourceLabel } from '../lib/source'
 import CtaDialog from './CtaDialog'
 
 const LINKS = [
@@ -31,6 +32,7 @@ function isActive(path, to) {
 export default function Nav({ path = '/' }) {
   const [drawer, setDrawer] = useState(false)
   const [cta, setCta] = useState(false)
+  const [activeSource, setActiveSource] = useState(() => getSource())
   const history = useHistory()
 
   const go = (event, to) => {
@@ -256,6 +258,32 @@ export default function Nav({ path = '/' }) {
                   browser ini, bukan di server.
                 </p>
               )}
+            </div>
+
+            <div className="divider my-5" />
+
+            <div className="flex items-center justify-between">
+              <span className="label">Sumber katalog</span>
+              <span className="font-mono text-[10px] text-slate-600">{sourceLabel(activeSource)}</span>
+            </div>
+            <div className="mt-2 flex gap-2">
+              {SOURCES.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveSource(item.id)
+                    setSource(item.id)
+                  }}
+                  aria-pressed={activeSource === item.id}
+                  title={item.hint}
+                  className={`chip flex-1 justify-center ${
+                    activeSource === item.id ? 'chip-active' : ''
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
 
             <div className="mt-auto pt-6">
