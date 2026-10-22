@@ -1,24 +1,12 @@
 import * as cheerio from 'cheerio'
 import { CONFIG } from './config.js'
+import { fetchHtml } from './fetcher.js'
 
 const UP = CONFIG.upstream
 
 async function getHtml(url, extraHeaders = {}) {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), CONFIG.requestTimeoutMs)
-  try {
-    const res = await fetch(url, {
-      headers: { ...CONFIG.upstreamHeaders, ...extraHeaders },
-      signal: ctrl.signal,
-      redirect: 'follow',
-    })
-    if (!res.ok) throw new Error(`upstream ${res.status} for ${url}`)
-    return await res.text()
-  } finally {
-    clearTimeout(timer)
-  }
+  return fetchHtml(url, extraHeaders)
 }
-
 const text = (node) => (node ? node.text().replace(/\s+/g, ' ').trim() : '')
 const abs = (href, base = UP) => {
   try {

@@ -1,5 +1,6 @@
 import { CONFIG, absolute, originOf } from './config.js'
 import { fetchEpisodePage, extractVideoId } from './donghive.js'
+import { fetchBinary, fetchUpstream } from './fetcher.js'
 
 const DM_PLAYER_BASE = 'https://geo.dailymotion.com/player/xhojl.html'
 const DM_API_HOSTS = [
@@ -114,33 +115,18 @@ export async function proxyAsset(req, res, rawUrl) {
     res.status(403).json({ error: 'host tidak diizinkan' })
     return
   }
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), CONFIG.requestTimeoutMs)
   try {
-    const upstream = await fetch(target, {
-      headers: {
-        'User-Agent': CONFIG.upstreamHeaders['User-Agent'],
-        Referer: CONFIG.upstreamReferer,
-        Origin: 'https://geo.dailymotion.com',
-      },
-      signal: ctrl.signal,
-      redirect: 'follow',
+    const { buffer, contentType } = await fetchBinary(target.toString(), {
+      Referer: CONFIG.upstreamReferer,
+      Origin: 'https://geo.dailymotion.com',
     })
 
-    const contentType = upstream.headers.get('content-type') || 'application/octet-stream'
     res.setHeader('Content-Type', contentType)
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Cache-Control', 'public, max-age=3600')
-
-    const disposition = upstream.headers.get('content-disposition')
-    if (disposition) res.setHeader('Content-Disposition', disposition)
-
-    const buffer = Buffer.from(await upstream.arrayBuffer())
     res.send(buffer)
   } catch (err) {
     res.status(502).json({ error: `proxy gagal: ${err.message}` })
-  } finally {
-    clearTimeout(timer)
   }
 }
 
@@ -154,12 +140,11 @@ export async function proxyPlayer(req, res, videoId) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), CONFIG.requestTimeoutMs)
   try {
-    const upstream = await fetch(target, {
+    const upstream = await fetchUpstream(target, {
       headers: {
         'User-Agent': CONFIG.upstreamHeaders['User-Agent'],
         Referer: 'https://geo.dailymotion.com/',
       },
-      signal: ctrl.signal,
     })
     const html = await upstream.text()
     let out = rewriteToProxy(html, origin)
