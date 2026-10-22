@@ -442,9 +442,13 @@ export async function fetchAnimeDetail(slug) {
 const KIND_META = {
   okru: { label: 'OKRU', rank: 0, playable: true, note: '' },
   odysee: { label: 'Odysee', rank: 1, playable: true, note: '' },
-  mega: { label: 'MEGA', rank: 2, playable: true, note: '' },
-  dtube: { label: 'DTube', rank: 3, playable: true, note: 'CDN kadang mati' },
+  // mega.nz/embed itu file viewer (perlu klik putar/unduh), bukan player
+  // streaming — tapi masih jalan, jadi di atas DTube.
+  mega: { label: 'MEGA', rank: 2, playable: true, note: 'file viewer (klik untuk putar)' },
   other: { label: 'Server lain', rank: 5, playable: true, note: '' },
+  // Diuji 2026-10: master.m3u8 nas2.d.tube balas 404 untuk semua video
+  // yang kita cek, jadi DTube ditandai tidak bisa diputar.
+  dtube: { label: 'DTube', rank: 8, playable: false, note: 'CDN d.tube 404' },
   dailymotion: {
     label: 'Dailymotion',
     rank: 9,
@@ -485,8 +489,10 @@ export function parseServers($) {
     const url = abs(m[1].replace(/&amp;/g, '&'), UP)
     const kind = providerKind(url)
     const meta = KIND_META[kind] || KIND_META.other
+    // Label upstream sering salah platform (mis. "Odysee" padahal mega.nz),
+    // jadi untuk kind yang dikenal pakai label kanonik kita.
     found.push({
-      name: text($(el)) || meta.label,
+      name: kind === 'other' ? text($(el)) || meta.label : meta.label,
       kind,
       url,
       playable: meta.playable,
