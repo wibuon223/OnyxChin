@@ -6,7 +6,8 @@ import { CONFIG } from './config.js'
  *
  * Kenapa perlu: donghive.vip (Cloudflare) memblokir IP datacenter —
  * Render free-tier kena 403, sedangkan egress residential (WSL) lolos.
- * Solusinya: kalau direct gagal (403/406/429/5xx), putar BrightData ISP proxy.
+ * Solusinya: kalau direct gagal (403/406/429/5xx atau exception), putar
+ * BrightData ISP proxy yang dikonfigurasi lewat env UPSTREAM_PROXIES.
  */
 const agents = new Map()
 
@@ -32,12 +33,9 @@ export function upstreamProxies() {
     .filter(Boolean)
 }
 
-let roundRobin = 0
-
 /**
  * @param {string} url
- * @param {object} opts  { headers, timeoutMs, method, body }
- * @param {boolean} allowProxy  proxy hanya dipakai kalau env var terisi
+ * @param {object} opts  { headers, timeoutMs, method, body, allowProxy }
  */
 export async function fetchUpstream(url, opts = {}) {
   const {
@@ -64,22 +62,24 @@ export async function fetchUpstream(url, opts = {}) {
         signal: controller.signal,
         redirect: 'follow',
       }
-      if (proxy) init.dispatcher = agentFor(proxy)
 
-      const res = await fetch(url, init)
+      // PENTING: selalu pakai fetch dari paket undici yang sama dengan
+      // ProxyAgent-nya. fetch bawaan Node memakai undici internal terpisah,
+      // dan dispatcher dari instance lain akan error
+      // "invalid onRequestStart method".
+      const res = proxy
+        ? await undiciFetch(url, { ...init, dispatcher: agentFor(proxy) })
+        : await undiciFetch(url, init)
 
-      // Status yang menandakan blokir IP — perlu dicoba lewat proxy.
-      if (proxy === null && res.status >= 400 && res.status !== 404) {
-        if (proxies.length) {
-          lastError = new Error(`upstream ${res.status} (direct, akan coba proxy)`)
-          continue
-        }
+      // Status yang menandakan blokir IP -> perlu dicoba lewat proxy.
+      if (proxy === null && res.status >= 400 && res.status !== 404 && proxies.length) {
+        lastError = new Error(`upstream ${res.status} (direct, coba proxy)`)
+        continue
       }
       return res
     } catch (err) {
       lastError = err
-      if (proxy === null && proxies.length) continue
-      // proxy gagal juga -> coba lane berikutnya, jangan berhenti di lane pertama
+      // Lanjut ke lane berikutnya, jangan berhenti di lane pertama.
       continue
     } finally {
       clearTimeout(timer)
@@ -88,7 +88,7 @@ export async function fetchUpstream(url, opts = {}) {
 
   const detail = lastError?.cause?.message || lastError?.cause?.code || ''
   const err = new Error(
-    `${lastError?.message || 'upstream fetch gagal'}${detail ? ` (${detail})` : ''} — ${url}`,
+    `${lastError?.message || 'upstream fetch gagal'}${detail ? ` (${detail})` : ''} - ${url}`,
   )
   err.cause = lastError?.cause
   throw err
@@ -112,14 +112,3 @@ export async function fetchBinary(url, extraHeaders = {}) {
   const buffer = Buffer.from(await res.arrayBuffer())
   return { buffer, contentType: res.headers.get('content-type') || 'application/octet-stream' }
 }
-
-/** Rotasi proxy bergantian (dipakai untuk asset besar, hindari satu lane jenuh). */
-export function nextProxy() {
-  const proxies = upstreamProxies()
-  if (!proxies.length) return null
-  const proxy = proxies[roundRobin % proxies.length]
-  roundRobin += 1
-  return proxy
-}
-
-export { undiciFetch }
