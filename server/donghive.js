@@ -426,6 +426,77 @@ export async function fetchAnimeDetail(slug) {
 
 /* ─────────────────────────── halaman episode ─────────────────────────── */
 
+/**
+ * Server alternatif per episode.
+ *
+ * Halaman episode menyimpan daftar mirror di `<select class="mirror">`,
+ * tiap `<option value>` berisi HTML <iframe> yang di-base64. Kita decode,
+ * ambil src-nya, lalu klasifikasikan per host supaya UI bisa menyusun
+ * pemilih server (dan tahu mana yang benar-benar bisa diputar).
+ *
+ * Catatan lapangan: player Dailymotion milik donghive (geo.dailymotion.com/
+ * player/<id>.html) DIKUNCI ke domain donghive.vip — dari origin lain
+ * hasilnya "This video cannot be played on this site". Jadi DM selalu
+ * ditandai playable:false dan ditaruh paling bawah.
+ */
+const KIND_META = {
+  okru: { label: 'OKRU', rank: 0, playable: true, note: '' },
+  odysee: { label: 'Odysee', rank: 1, playable: true, note: '' },
+  mega: { label: 'MEGA', rank: 2, playable: true, note: '' },
+  dtube: { label: 'DTube', rank: 3, playable: true, note: 'CDN kadang mati' },
+  other: { label: 'Server lain', rank: 5, playable: true, note: '' },
+  dailymotion: {
+    label: 'Dailymotion',
+    rank: 9,
+    playable: false,
+    note: 'dikunci ke donghive.vip',
+  },
+}
+
+function providerKind(url) {
+  let host = ''
+  try {
+    host = new URL(url).hostname.toLowerCase()
+  } catch {
+    return 'other'
+  }
+  if (host.includes('dailymotion')) return 'dailymotion'
+  if (host.includes('d.tube')) return 'dtube'
+  if (host.includes('odysee')) return 'odysee'
+  if (host.includes('mega.nz') || host.includes('mega.co.nz')) return 'mega'
+  if (host.includes('ok.ru') || host.includes('morencius') || host.includes('okru')) return 'okru'
+  return 'other'
+}
+
+/** Decode semua mirror server dari <select class="mirror">. */
+export function parseServers($) {
+  const found = []
+  $('select.mirror option').each((_, el) => {
+    const raw = ($(el).attr('value') || '').trim()
+    if (!raw) return
+    let decoded = ''
+    try {
+      decoded = Buffer.from(raw, 'base64').toString('utf8')
+    } catch {
+      return
+    }
+    const m = decoded.match(/src=["']([^"']+)["']/i)
+    if (!m) return
+    const url = abs(m[1].replace(/&amp;/g, '&'), UP)
+    const kind = providerKind(url)
+    const meta = KIND_META[kind] || KIND_META.other
+    found.push({
+      name: text($(el)) || meta.label,
+      kind,
+      url,
+      playable: meta.playable,
+      note: meta.note,
+      rank: meta.rank,
+    })
+  })
+  return found.sort((a, b) => a.rank - b.rank).map(({ rank, ...rest }) => rest)
+}
+
 export async function fetchEpisodePage(slug) {
   const url = `${UP}/${String(slug).replace(/^\/+|\/+$/g, '')}/`
   const $ = cheerio.load(await getHtml(url))
@@ -452,6 +523,10 @@ export async function fetchEpisodePage(slug) {
     }
   })
 
+  const servers = parseServers($)
+  const dm = servers.find((s) => s.kind === 'dailymotion')
+  const primary = servers.find((s) => s.playable) || servers[0] || null
+
   return {
     title: text($('h1').first()),
     url,
@@ -459,8 +534,10 @@ export async function fetchEpisodePage(slug) {
     anime_title: animeTitle,
     anime_url: animeUrl,
     anime_slug: animeUrl ? slugify(animeUrl) : animeSlugFromEpisodeSlug(slug),
-    embed_src: embedSrc,
-    video_id: extractVideoId(embedSrc),
+    embed_src: dm?.url || embedSrc,
+    video_id: extractVideoId(dm?.url || embedSrc),
+    servers,
+    default_server: primary?.kind || '',
     downloads,
     description: text($('.bixbox.infx, .bixbox.information').first()),
   }

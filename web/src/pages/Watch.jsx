@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { ArrowLeft, Download, Server } from 'lucide-react'
+import { ArrowLeft, Download } from 'lucide-react'
 import { fetchAnime, fetchEpisode } from '../api'
 import ErrorState from '../components/ErrorState'
 import EpisodeList from '../components/EpisodeList'
@@ -72,6 +72,7 @@ export default function Watch({ slug }) {
           <div className="-mx-4 sm:mx-0">
             <Player
               embed={data.embed || ''}
+              sources={servers}
               title={data.title || 'Player episode'}
               className="ring-0"
               frameClassName="rounded-none sm:rounded-xl"
@@ -100,17 +101,11 @@ export default function Watch({ slug }) {
             ) : null}
 
             {servers.length ? (
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <span className="label inline-flex items-center gap-1.5">
-                  <Server size={12} strokeWidth={2.2} aria-hidden="true" />
-                  Server
-                </span>
-                {servers.map((server) => (
-                  <span key={server.id || server.label} className="chip">
-                    {server.label || server.id}
-                  </span>
-                ))}
-              </div>
+              <p className="mt-3 text-[11px] text-slate-500">
+                {servers.filter((s) => s.playable !== false).length} dari {servers.length} server
+                siap diputar &middot;{' '}
+                {servers.map((s) => s.name || s.kind).join(' / ')}
+              </p>
             ) : null}
 
             {downloads.length ? (

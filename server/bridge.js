@@ -167,47 +167,118 @@ export async function proxyPlayer(req, res, videoId) {
 const BRIDGE_CSS = `
   *,*::before,*::after{box-sizing:border-box}
   html,body{margin:0;height:100%;background:#07090f;color:#e2e8f0;
-    font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
-  .stage{position:relative;width:100%;height:100%;display:grid;place-items:center}
-  iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
-  .fallback{position:absolute;inset:auto 0 0 0;padding:10px 14px;font-size:12px;
-    color:#94a3b8;background:linear-gradient(transparent,rgba(7,9,15,.9));text-align:center}
+    font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+    overscroll-behavior:none}
+  body{display:flex;flex-direction:column}
+  .stage{position:relative;flex:1;min-height:0;background:#000}
+  .stage iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
+  .stage .empty{position:absolute;inset:0;display:grid;place-items:center;
+    font-size:13px;color:#64748b;text-align:center;padding:24px}
+  .bar{display:flex;align-items:center;gap:8px;padding:8px 10px;flex-wrap:wrap;
+    background:#0b0f18;border-top:1px solid rgba(148,163,184,.14)}
+  .bar .lbl{font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+    color:#475569;margin-right:2px;flex:none}
+  .bar button{appearance:none;cursor:pointer;font:inherit;font-size:12px;
+    padding:6px 11px;border-radius:999px;border:1px solid rgba(148,163,184,.2);
+    background:rgba(148,163,184,.07);color:#cbd5e1;display:inline-flex;
+    align-items:center;gap:6px;transition:.16s;white-space:nowrap}
+  .bar button:hover{background:rgba(148,163,184,.14);color:#fff}
+  .bar button[aria-pressed="true"]{background:#0d9488;border-color:#0d9488;color:#fff}
+  .bar button.locked{border-style:dashed;color:#94a3b8}
+  .bar button.locked[aria-pressed="true"]{background:#7c2d12;border-color:#7c2d12;color:#fff}
+  .bar .dot{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.75}
+  .bar .sp{flex:1}
+  .bar a{font-size:11px;color:#64748b;text-decoration:none}
+  .bar a:hover{color:#6ee7f0}
+  .note{font-size:11px;color:#f59e0b;padding:0 12px 8px;background:#0b0f18;display:none}
+  .note.on{display:block}
+  @media (max-width:520px){
+    .bar{padding:6px 8px;gap:6px}
+    .bar button{font-size:11px;padding:5px 9px}
+    .bar .lbl{display:none}
+  }
 `
 
 /**
- * Halaman player milik kita — iframe-nya menunjuk ke domain kita sendiri
- * (bridge), bukan langsung ke CDN, jadi hotlink/origin selalu milik relay.
+ * Halaman player milik kita.
+ *
+ * Daftar server diambil dari <select class="mirror"> upstream (dailymotion,
+ * dtube, odysee, okru). Kita render satu iframe + tombol pemilih server.
+ *
+ * Kenapa perlu pemilih: player Dailymotion donghive dikunci domain-nya,
+ * jadi dari origin relay hasilnya "This video cannot be played on this site".
+ * Provider lain (OKRU/Odysee/MEGA/DTube) bebas referer dan bisa diputar.
  */
 export async function bridgePage(req, res, slug, opts = {}) {
   const origin = originOf(req)
-  const mode = opts.mode || 'bridge' // bridge | proxy | direct
   const title = opts.title || 'Donghive Relay'
+  const wantServer = String(req.query.server || '').toLowerCase()
+  // ?bar=0 → dipakai saat halaman ini di-embed di situs kita sendiri
+  // (pemilih server dirender React, biar tidak dobel).
+  const hideBar = String(req.query.bar || '') === '0'
 
+  let page = null
   let videoId = ''
-  let direct = ''
   try {
-    const resolved = await resolveVideo(slug)
-    videoId = resolved.video_id
-    direct = resolved.direct_url
+    page = await fetchEpisodePage(slug)
+    videoId = page.video_id || ''
   } catch (err) {
+    page = null
+  }
+
+  if (!page || (!page.servers?.length && !videoId)) {
     res
       .status(404)
       .type('html')
       .send(
         `<!doctype html><html lang="id"><head><meta charset="utf-8"><title>Tidak ditemukan</title><style>${BRIDGE_CSS}</style></head>
-         <body><div class="stage"><div style="text-align:center;padding:24px">
-         <div style="font-size:15px;margin-bottom:12px">Video tidak ditemukan</div>
-         <a href="${origin}" style="color:#6ee7f0;font-size:13px">Kembali ke beranda</a>
-         </div></div></body></html>`,
+        <body><div class="stage"><div class="empty">
+        <div>Video tidak ditemukan.<br><a href="${origin}" style="color:#6ee7f0">Kembali ke beranda</a></div>
+        </div></div></body></html>`,
       )
     return
   }
 
-  let src = direct
-  if (mode === 'bridge') src = `${origin}/bridge/dm?video=${videoId}`
-  if (mode === 'proxy') src = `${origin}/bridge/dm?video=${videoId}`
+  // Bangun daftar sumber yang bisa dipasang di iframe.
+  const sources = (page.servers || []).map((s) => {
+    if (s.kind === 'dailymotion') {
+      const vid = s.url.match(/[?&]video=([a-zA-Z0-9]+)/)?.[1] || videoId
+      return {
+        kind: s.kind,
+        name: s.name,
+        playable: false,
+        note: s.note || 'dikunci ke donghive.vip',
+        src: vid ? `${origin}/bridge/dm?video=${vid}` : '',
+      }
+    }
+    return { kind: s.kind, name: s.name, playable: s.playable !== false, note: s.note || '', src: s.url }
+  })
 
-  const iframeHtml = `<iframe src="${src}" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="no-referrer" title="${escapeHtml(title)}"></iframe>`
+  if (!sources.length && videoId) {
+    sources.push({
+      kind: 'dailymotion',
+      name: 'Dailymotion',
+      playable: false,
+      note: 'dikunci ke donghive.vip',
+      src: `${origin}/bridge/dm?video=${videoId}`,
+    })
+  }
+
+  const initial =
+    sources.find((s) => s.kind === wantServer) ||
+    sources.find((s) => s.playable) ||
+    sources[0]
+
+  const buttons = sources
+    .map(
+      (s) =>
+        `<button type="button" data-kind="${escapeHtml(s.kind)}" data-src="${escapeHtml(s.src)}"` +
+        ` data-playable="${s.playable ? '1' : '0'}" data-note="${escapeHtml(s.note)}"` +
+        `${s.kind === initial.kind ? ' aria-pressed="true"' : ' aria-pressed="false"'}` +
+        `${s.playable ? '' : ' class="locked"'}>` +
+        `<span class="dot"></span>${escapeHtml(s.name || s.kind)}</button>`,
+    )
+    .join('')
 
   res
     .status(200)
@@ -222,11 +293,60 @@ export async function bridgePage(req, res, slug, opts = {}) {
   <meta name="referrer" content="no-referrer">
   <style>${BRIDGE_CSS}</style>
 </head>
-<body>
+<body${hideBar ? ' class="embed"' : ''}>
   <div class="stage">
-    ${iframeHtml}
-    <div class="fallback">${escapeHtml(title)}</div>
+    <iframe id="p" src="${escapeHtml(initial.src)}" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="no-referrer" title="${escapeHtml(title)}"></iframe>
   </div>
+${hideBar ? '' : `  <div class="note" id="note"></div>
+  <div class="bar">
+    <span class="lbl">Server</span>
+    ${buttons}
+    <span class="sp"></span>
+    <a href="${origin}/watch/${escapeHtml(slug)}" target="_top">buka di situs &rarr;</a>
+  </div>`}
+  <script>
+  (function () {
+    var frame = document.getElementById('p')
+    var note = document.getElementById('note')
+    var KEY = 'dh:server'
+
+    function paint(src, noteText) {
+      if (!src) return
+      if (frame.src !== src) frame.src = src
+      if (!note) return
+      if (noteText) { note.textContent = noteText; note.classList.add('on') }
+      else { note.textContent = ''; note.classList.remove('on') }
+    }
+
+    document.querySelectorAll('.bar button').forEach(function (b) {
+      b.addEventListener('click', function () {
+        document.querySelectorAll('.bar button').forEach(function (o) {
+          o.setAttribute('aria-pressed', o === b ? 'true' : 'false')
+        })
+        try { localStorage.setItem(KEY, b.dataset.kind) } catch (e) {}
+        var msg = b.dataset.playable === '1'
+          ? (b.dataset.note || '')
+          : 'Server ' + b.textContent.trim() + ' dikunci pemiliknya (' + b.dataset.note + '). Kalau video tidak jalan, pilih server lain.'
+        paint(b.dataset.src, msg)
+      })
+    })
+
+    // ingat pilihan terakhir, tapi jangan timpa ?server= eksplisit
+    try {
+      var saved = localStorage.getItem(KEY)
+      var explicit = new URLSearchParams(location.search).get('server')
+      if (!explicit && saved) {
+        var b = document.querySelector('.bar button[data-kind="' + saved + '"]')
+        if (b && b.dataset.playable === '1') b.click()
+      }
+    } catch (e) {}
+
+    var cur = document.querySelector('.bar button[aria-pressed="true"]')
+    if (cur && cur.dataset.playable !== '1') {
+      paint(null, 'Server ' + cur.textContent.trim() + ' dikunci pemiliknya — pilih server lain di bawah.')
+    }
+  })()
+  </script>
 </body>
 </html>`,
     )
